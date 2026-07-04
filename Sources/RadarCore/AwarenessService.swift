@@ -1,11 +1,11 @@
 import Foundation
 
 public actor AwarenessService {
-    private let store: AwarenessStore
+    private let store: any AwarenessStoreProtocol
     private let staleInterval: TimeInterval = 30 * 60
 
-    public init(store: AwarenessStore = AwarenessStore()) {
-        self.store = store
+    public init(store: (any AwarenessStoreProtocol)? = nil) {
+        self.store = store ?? BlazeDBAwarenessStore()
     }
 
     public func register(
@@ -35,26 +35,28 @@ public actor AwarenessService {
         await WorkspaceRegistry.shared.note(workspacePath)
         await refreshGitForWorkspace(workspacePath)
         if let registrationId,
-           var reg = await store.find(workspacePath: workspacePath, id: registrationId),
+           var reg = try? await store.find(workspacePath: workspacePath, id: registrationId),
            reg.status == .active {
             reg.lastSeen = Date()
             try? await store.upsert(workspacePath: workspacePath, registration: reg)
+            try? await store.recordSync(workspacePath: workspacePath, agentId: registrationId, at: Date())
         }
         return await getActiveWork(workspacePath: workspacePath, excludeId: nil)
     }
 
     public func getActiveWork(workspacePath: String, excludeId: UUID? = nil) async -> ActiveWorkSnapshot {
         await reapStale(workspacePath: workspacePath)
-        var active = await store.activeRegistrations(workspacePath: workspacePath)
+        var active = (try? await store.activeRegistrations(workspacePath: workspacePath)) ?? []
         if let excludeId {
             active = active.filter { $0.id != excludeId }
         }
-        let (related, files) = RelatedAreaDetector.analyze(await store.load(workspacePath: workspacePath))
+        let all = (try? await store.load(workspacePath: workspacePath)) ?? []
+        let (related, files) = RelatedAreaDetector.analyze(all)
         return ActiveWorkSnapshot(registrations: active, relatedAreas: related, fileOverlaps: files)
     }
 
     public func update(workspacePath: String, registrationId: UUID, patch: UpdateAgentRequest) async throws -> AgentRegistration {
-        guard var reg = await store.find(workspacePath: workspacePath, id: registrationId) else {
+        guard var reg = try await store.find(workspacePath: workspacePath, id: registrationId) else {
             throw AwarenessError.registrationNotFound
         }
         guard reg.status == .active else {
@@ -77,7 +79,7 @@ public actor AwarenessService {
     }
 
     public func markDone(workspacePath: String, registrationId: UUID) async throws -> AgentRegistration {
-        guard var reg = await store.find(workspacePath: workspacePath, id: registrationId) else {
+        guard var reg = try await store.find(workspacePath: workspacePath, id: registrationId) else {
             throw AwarenessError.registrationNotFound
         }
         reg.status = .done
@@ -89,7 +91,7 @@ public actor AwarenessService {
     }
 
     public func refreshGit(workspacePath: String, registrationId: UUID) async -> AgentRegistration? {
-        guard var reg = await store.find(workspacePath: workspacePath, id: registrationId),
+        guard var reg = try? await store.find(workspacePath: workspacePath, id: registrationId),
               reg.status == .active else { return nil }
 
         if let obs = GitObserver.observe(worktreePath: reg.worktree) {
@@ -103,14 +105,14 @@ public actor AwarenessService {
     }
 
     public func refreshGitForWorkspace(_ workspacePath: String) async {
-        let active = await store.activeRegistrations(workspacePath: workspacePath)
+        let active = (try? await store.activeRegistrations(workspacePath: workspacePath)) ?? []
         for reg in active {
             _ = await refreshGit(workspacePath: workspacePath, registrationId: reg.id)
         }
     }
 
     private func reapStale(workspacePath: String) async {
-        var all = await store.load(workspacePath: workspacePath)
+        guard var all = try? await store.load(workspacePath: workspacePath) else { return }
         let now = Date()
         var changed = false
         for idx in all.indices where all[idx].status == .active {

@@ -16,8 +16,12 @@ final class AwarenessTests: XCTestCase {
         super.tearDown()
     }
 
+    private func makeService() -> AwarenessService {
+        AwarenessService(store: BlazeDBAwarenessStore())
+    }
+
     func testCoreInvariant() async throws {
-        let service = AwarenessService()
+        let service = makeService()
         let ws = tempDir.path
 
         let a = try await service.register(
@@ -43,7 +47,7 @@ final class AwarenessTests: XCTestCase {
     }
 
     func testSyncDeltaBaseline() async throws {
-        let service = AwarenessService()
+        let service = makeService()
         let ws = tempDir.path
         let a = try await service.register(workspacePath: ws, agentName: "a", task: "t", branch: "b", worktree: ws)
         _ = try await service.update(
@@ -67,5 +71,20 @@ final class AwarenessTests: XCTestCase {
         let b = AgentRegistration(agentName: "B", task: "fix overlay interruptions", branch: "fix/b", worktree: "/tmp")
         let result = RelatedAreaDetector.analyze([a, b])
         XCTAssertFalse(result.related.isEmpty)
+    }
+
+    func testBlazeDBPersistsAcrossReopen() async throws {
+        let ws = tempDir.path
+        let serviceA = AwarenessService(store: BlazeDBAwarenessStore())
+        let reg = try await serviceA.register(workspacePath: ws, agentName: "persist", task: "t", branch: "b", worktree: ws)
+        _ = try await serviceA.update(
+            workspacePath: ws, registrationId: reg.id,
+            patch: UpdateAgentRequest(workspacePath: ws, registrationId: reg.id.uuidString, discoveredFacts: ["durable-finding"])
+        )
+
+        let serviceB = AwarenessService(store: BlazeDBAwarenessStore())
+        let loaded = try await serviceB.getActiveWork(workspacePath: ws)
+        XCTAssertEqual(loaded.registrations.count, 1)
+        XCTAssertTrue(loaded.registrations[0].discoveredFacts.contains("durable-finding"))
     }
 }

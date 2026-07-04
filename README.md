@@ -13,7 +13,7 @@ Next engineer      → avoids redoing the same discovery
 Extracted from [ProjectBlaze](https://github.com/Mikedan37/ProjectBlaze) as a standalone tool.
 
 > **Why this repo is public**  
-> Much of the surrounding Blaze stack (ProjectBlaze, AgentDaemon internals, BlazeDB integration paths, etc.) stays private due to IP. Blaze Radar is the **showable slice** — the awareness pattern and architecture, without proprietary agent runtime or database dependencies. You can adopt the approach here without access to the rest of the monorepo.
+> Much of the surrounding Blaze stack (ProjectBlaze, AgentDaemon internals, proprietary agent runtime) stays **private due to IP**. Blaze Radar is the **showable slice** — a real multi-agent coordination architecture powered by [BlazeDB](https://github.com/Mikedan37/BlazeDB), without exposing private agent code. This is the first agent workflow built to dogfood BlazeDB as a durable coordination layer.
 
 ---
 
@@ -103,25 +103,34 @@ flowchart TB
         WT2["git worktree B"]
     end
 
-    subgraph persist["On-disk state (no BlazeDB)"]
-        STATE[".blaze/awareness/state.json"]
-        SESSION[".blaze/radar-session.json"]
-        SYNCFILE[".blaze/radar-sync.json\n(delta baseline)"]
-        SUMMARY[".blaze/radar/&lt;branch&gt;/summary.md"]
-        WSINDEX["~/.blaze/daemon/radar-workspaces.json"]
+    subgraph store["AwarenessStore (pluggable)"]
+        API["AwarenessStoreProtocol"]
+        BDB["BlazeDBAwarenessStore\n(default)"]
+        JSON["JSONAwarenessStore\n(optional adapter)"]
+    end
+
+    subgraph blazedb["BlazeDB — single-writer coordination"]
+        DB[".blaze/radar.blazedb"]
+        AGENTS["agents"]
+        FINDINGS["findings / events"]
+        GITOBS["git_observations"]
+        SYNCDB["sync_state"]
     end
 
     A1 & A2 & A3 --> REG & SYNC & UPD & ACT & DONE
     REG & SYNC & UPD & ACT & DONE --> RPC
     RPC --> SVC
-    SVC --> DET
-    SVC --> STATE
-    SVC --> SUMMARY
-    SYNC -.-> SYNCFILE
-    REG & SYNC -.-> SESSION
+    SVC --> API
+    API --> BDB
+    API -.-> JSON
+    BDB --> DB
+    DB --> AGENTS & FINDINGS & GITOBS & SYNCDB
+    SVC --> SUMMARY[".blaze/radar/&lt;branch&gt;/summary.md"]
+    SYNC -.-> SYNCFILE[".blaze/radar-sync.json\n(client delta baseline)"]
+    REG & SYNC -.-> SESSION[".blaze/radar-session.json"]
     SVC --> REGISTRY
-    REGISTRY --> WSINDEX
-    POLL --> REGISTRY
+    REGISTRY --> WSINDEX["~/.blaze/daemon/radar-workspaces.json"]
+    SVC --> DET
     POLL --> WT1 & WT2
     WT1 & WT2 -.->|"branch, HEAD, changed files"| SVC
     DET -.->|"related areas, file overlaps"| RPC
@@ -134,15 +143,15 @@ flowchart TB
 sequenceDiagram
     participant Agent as Agent CLI
     participant Daemon as blaze-radar-daemon
-    participant Store as state.json
+    participant Store as BlazeDB (.blaze/radar.blazedb)
     participant Git as git worktrees
     participant Sync as radar-sync.json
 
     Agent->>Daemon: sync(workspace, registrationId)
     Daemon->>Git: poll registered worktrees
     Git-->>Daemon: branch, HEAD, changed files
-    Daemon->>Store: refresh registrations + lastSeen heartbeat
-    Daemon->>Store: load all active work
+    Daemon->>Store: upsert agent + append findings + git observations
+    Daemon->>Store: record sync_state event
     Daemon->>Daemon: RelatedAreaDetector
     Daemon-->>Agent: ActiveWorkSnapshot
     Agent->>Sync: load previous baseline
@@ -153,24 +162,47 @@ sequenceDiagram
 
 | Module | Role |
 |--------|------|
-| `RadarCore` | Models, JSON store, awareness service, git observer, related-area detector |
+| `RadarCore` | `AwarenessStoreProtocol`, BlazeDB store, awareness service, git observer, related-area detector |
 | `RadarDaemon` | Background daemon + git poller |
 | `RadarClient` | Unix socket client |
 | `BlazeCLI` | `blaze radar` commands |
 
 The daemon tracks registered workspace roots in `~/.blaze/daemon/radar-workspaces.json` and polls **only those worktrees** — no hardcoded repo paths.
 
-### Storage: JSON files, not BlazeDB
+### Storage: BlazeDB-backed coordination
 
-**Blaze Radar does not use BlazeDB.** v1 persistence is plain JSON in your repo plus a small daemon index file. No database server, no BlazeBinary wire protocol, no cloud.
+Blaze Radar uses **[BlazeDB](https://github.com/Mikedan37/BlazeDB)** as the embedded persistence engine — not a shared Markdown file.
 
-The private ProjectBlaze monorepo may integrate awareness with BlazeDB elsewhere; this extracted repo intentionally stays minimal so the pattern is portable and inspectable.
+```
+Claude Code agents
+        ↓
+    Blaze Radar
+        ↓
+     BlazeDB
+        ↓
+single-writer serialized state
+durable events
+agent coordination log
+```
+
+**Why BlazeDB:** Multiple agents writing simultaneously must never corrupt state. BlazeDB provides single-writer coordination, durable append-style findings, and queryable history. This is structured coordination — not `echo >> standup.md`.
+
+**Pluggable storage:** `AwarenessStoreProtocol` defines the API. `BlazeDBAwarenessStore` is the default. `JSONAwarenessStore` remains as an optional adapter for lightweight testing — not the production architecture.
+
+| Collection | Purpose |
+|------------|---------|
+| `RadarAgent` | Registration core fields (task, branch, status, lastSeen) |
+| `RadarFinding` | Append-only discoveries, ruled-out hypotheses, invariants |
+| `RadarGitObservation` | Git poll history per agent |
+| `RadarSyncState` | Sync checkpoint events |
+
+Database path: `<workspace>/.blaze/radar.blazedb`
 
 ---
 
 ## Quick start
 
-**Requirements:** macOS 14+, Swift 6+, git
+**Requirements:** macOS 15+, Swift 6+, git
 
 ```bash
 git clone https://github.com/Mikedan37/blaze-radar.git
@@ -239,15 +271,15 @@ blaze radar register "fix signup flow" \
 
 ### Persistence
 
-All state lives in your repo — no cloud, no database:
+Coordination state lives in BlazeDB inside your repo. CLI session files are local to each agent process:
 
 ```
 your-repo/
   .blaze/
-    awareness/state.json      # all registrations
-    radar-session.json        # this CLI session's registration
-    radar-sync.json           # last sync snapshot (for deltas)
-    radar/<branch>/summary.md # human-readable branch notes
+    radar.blazedb              # BlazeDB — agents, findings, git obs, sync history
+    radar-session.json         # this CLI session's registration id
+    radar-sync.json            # client-side delta baseline for sync output
+    radar/<branch>/summary.md  # human-readable branch notes (derived)
 ```
 
 ### Sync semantics
@@ -297,7 +329,7 @@ PASS: only finding two is new
 PASS: finding one not repeated
 ```
 
-Unit tests (`swift test`) cover persistence, related-area detection, and sync heartbeat.
+Unit tests (`swift test`) cover persistence, related-area detection, sync heartbeat, and **10-agent concurrent register/update/sync** (no lost findings, no corruption).
 
 ---
 
@@ -311,17 +343,17 @@ Unit tests (`swift test`) cover persistence, related-area detection, and sync he
 
 ## Relationship to ProjectBlaze
 
-Blaze Radar originated as the awareness layer inside ProjectBlaze's AgentDaemon. That parent project and related packages (including BlazeDB-backed paths) remain private due to IP. **This repo is the open, reduced version** you can read, run, and fork without the rest of the stack.
+Blaze Radar originated as the awareness layer inside ProjectBlaze's AgentDaemon. The parent monorepo and proprietary agent runtime remain private due to IP. **This repo is the open architecture demo** — same awareness model, BlazeDB persistence, standalone daemon.
 
 | | ProjectBlaze (private) | Blaze Radar (this repo) |
 |--|------------------------|-------------------------|
-| Persistence | May use BlazeDB + JSON | JSON files only |
+| Persistence | BlazeDB via AgentDaemon | BlazeDB via `BlazeDBAwarenessStore` |
 | Wire protocol | BlazeBinary over AgentDaemon | JSON over Unix socket |
 | Socket | `/tmp/blaze_agent.sock` | `/tmp/blaze_radar.sock` |
 | Scope | Full agent runtime | Awareness layer only |
 | Mental model | register, sync, update, done | Same |
 
-You can run both side by side during migration.
+You can run both side by side during migration. ProjectBlaze can inject a custom `AwarenessStoreProtocol` implementation; the default here is `BlazeDBAwarenessStore`.
 
 ---
 
