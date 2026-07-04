@@ -130,6 +130,7 @@ flowchart TB
     REG & SYNC -.-> SESSION[".blaze/radar-session.json"]
     SVC --> REGISTRY
     REGISTRY --> WSINDEX["~/.blaze/daemon/radar-workspaces.json"]
+    POLL --> REGISTRY
     SVC --> DET
     POLL --> WT1 & WT2
     WT1 & WT2 -.->|"branch, HEAD, changed files"| SVC
