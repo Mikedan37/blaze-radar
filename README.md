@@ -14,6 +14,30 @@ Extracted from [ProjectBlaze](https://github.com/Mikedan37/ProjectBlaze) as a st
 
 ---
 
+## What this is not
+
+Blaze Radar does **not** make agents share a brain. It gives them the same situational awareness human engineers get from standups, PRs, and Slack.
+
+People will misunderstand this. Blaze Radar is:
+
+| It is | It is not |
+|-------|-----------|
+| A team whiteboard | A project manager |
+| Situational awareness | A shared mind / hive consciousness |
+| Pull-based observation | Push notifications or autopilot |
+| "Look around before duplicating work" | Scheduling, assignment, or ownership claims |
+| Awareness first | A merge train (that comes later, if the pain earns it) |
+
+**The actual product metric:** Did Agent B learn what Agent A discovered *before* spending three hours on the same investigation?
+
+The scheduler collision that motivated this wasn't a code-generation failure. Both agents wrote good code. The failure was that they didn't know they were coworkers. That's the bug Blaze Radar patches.
+
+**Adoption reality:** Radar only works if agents actually use it. `blaze radar sync` needs to become muscle memory — every 15 minutes or before changing approach. If agents ignore it, you get that one Confluence page nobody has updated since 2019, but in Markdown.
+
+**Longer term (not v1):** MCP integration could lower the "remember to run a shell command" problem — auto-register on session start, a tool call to check radar, auto-update on discoveries. Not because MCP is magically smarter, but because it removes friction. For now: awareness first, merge train second.
+
+---
+
 ## The problem
 
 Running 4–6 agents in parallel on one monorepo fails in predictable ways:
@@ -41,14 +65,7 @@ Blaze Radar gives you:
 - **Git observation** — daemon independently polls registered worktrees (trust, but verify)
 - **Sync checkpoints** — one command refreshes heartbeat, git state, and shows *only new findings* since your last sync
 
-### What it deliberately does NOT do
-
-- No scheduling or assignment
-- No ownership claims or file locks
-- No merge automation or integration queue
-- No MCP push notifications (v1 is pull-based by design)
-
-Fix "nobody knows what anyone is doing" first. Let the next pain earn its right to exist.
+Fix "nobody knows what anyone is doing" first. Let the next pain earn its right to exist. See [What this is not](#what-this-is-not) for scope boundaries.
 
 ---
 
