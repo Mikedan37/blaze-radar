@@ -1,6 +1,6 @@
 # Blaze Radar
 
-**A shared awareness layer for parallel AI coding agents.**
+**A BlazeDB-backed coordination layer for parallel AI coding agents.**
 
 When you run multiple Claude/Cursor agents across git worktrees, nobody knows what anyone else is doing. Blaze Radar is the team whiteboard — not a project manager, not a merge bot, not Skynet. Just observability so agents stop duplicating each other's investigations.
 
@@ -10,10 +10,7 @@ Engineer learns    → updates the board
 Next engineer      → avoids redoing the same discovery
 ```
 
-Extracted from [ProjectBlaze](https://github.com/Mikedan37/ProjectBlaze) as a standalone tool.
-
-> **Why this repo is public**  
-> Much of the surrounding Blaze stack (ProjectBlaze, AgentDaemon internals, proprietary agent runtime) stays **private due to IP**. Blaze Radar is the **showable slice** — a real multi-agent coordination architecture powered by [BlazeDB](https://github.com/Mikedan37/BlazeDB), without exposing private agent code. This is the first agent workflow built to dogfood BlazeDB as a durable coordination layer.
+> **Fully usable from this repo.** You do **not** need AgentDaemon, ProjectBlaze, or any private Blaze infrastructure to clone, build, and run Blaze Radar. This repository ships its own daemon (`blaze-radar-daemon`) and CLI (`blaze`).
 
 ---
 
@@ -69,6 +66,29 @@ Blaze Radar gives you:
 - **Sync checkpoints** — one command refreshes heartbeat, git state, and shows *only new findings* since your last sync
 
 Fix "nobody knows what anyone is doing" first. Let the next pain earn its right to exist. See [What this is not](#what-this-is-not) for scope boundaries.
+
+---
+
+## What's public vs. private
+
+Blaze Radar was extracted from an internal agent stack. Here's what you can and cannot access today:
+
+| Component | Status | Notes |
+|-----------|--------|-------|
+| **blaze-radar** (this repo) | **Public** | Clone, build, run, contribute — complete standalone tool |
+| **[BlazeDB](https://github.com/Mikedan37/BlazeDB)** | **Public** | Embedded persistence engine; SwiftPM dependency |
+| **AgentDaemon** | **Private** | Internal agent runtime — **not required** to use Blaze Radar |
+| **ProjectBlaze** | **Private** | Parent monorepo — **not required**; no public repo |
+| **AgentCLI / full Blaze agent tooling** | **Private** | Broader CLI beyond `blaze radar` — not in this repo |
+
+**What this means for you:**
+
+- You **can** run multi-agent awareness today with only this repo + BlazeDB.
+- You **cannot** drop this into the private AgentDaemon wire protocol or get the full ProjectBlaze agent runtime from GitHub.
+- If you work inside the private Blaze stack, Radar's awareness model maps to the internal design — but this open repo is the reference implementation.
+
+> **Why this repo exists publicly**  
+> The proprietary agent runtime stays private due to IP. Blaze Radar is the **showable architecture** — a real coordination layer powered by BlazeDB, demonstrating how parallel coding agents share situational awareness without exposing internal agent code.
 
 ---
 
@@ -342,19 +362,39 @@ Unit tests (`swift test`) cover persistence, related-area detection, sync heartb
 
 ---
 
-## Relationship to ProjectBlaze
+## Relationship to the private Blaze stack
 
-Blaze Radar originated as the awareness layer inside ProjectBlaze's AgentDaemon. The parent monorepo and proprietary agent runtime remain private due to IP. **This repo is the open architecture demo** — same awareness model, BlazeDB persistence, standalone daemon.
+Blaze Radar originated as the awareness layer inside a **private** ProjectBlaze / AgentDaemon codebase. That parent project is not on GitHub. **This repo is the open, self-contained version.**
 
-| | ProjectBlaze (private) | Blaze Radar (this repo) |
-|--|------------------------|-------------------------|
+| | Private Blaze stack | Blaze Radar (this repo) |
+|--|---------------------|-------------------------|
+| Availability | Internal only | Public on GitHub |
 | Persistence | BlazeDB via AgentDaemon | BlazeDB via `BlazeDBAwarenessStore` |
 | Wire protocol | BlazeBinary over AgentDaemon | JSON over Unix socket |
 | Socket | `/tmp/blaze_agent.sock` | `/tmp/blaze_radar.sock` |
+| Daemon | AgentDaemon (private) | `blaze-radar-daemon` (included here) |
 | Scope | Full agent runtime | Awareness layer only |
 | Mental model | register, sync, update, done | Same |
 
-You can run both side by side during migration. ProjectBlaze can inject a custom `AwarenessStoreProtocol` implementation; the default here is `BlazeDBAwarenessStore`.
+You do not need access to the private stack to use or contribute to this project. If you have both environments, they can run side by side during migration.
+
+---
+
+## Contributing
+
+Contributions welcome on awareness, storage adapters, CLI ergonomics, tests, and docs.
+
+```bash
+git clone https://github.com/Mikedan37/blaze-radar.git
+cd blaze-radar
+swift build
+swift test
+scripts/blaze-radar-sync-e2e.sh   # e2e proof
+```
+
+**Good first areas:** `RelatedAreaDetector` signal words, `AwarenessStoreProtocol` adapters, MCP tooling (out of scope for core v1 but welcome as experiments), README and playbook improvements.
+
+Please keep PRs focused on **awareness only** — no scheduling, assignment, merge automation, or agent control. Open an issue before large architectural changes.
 
 ---
 
