@@ -6,6 +6,8 @@ If you open three Claude Code sessions on one repo, each one starts with its own
 
 Radar gives those sessions a shared board. Agents can see who else is active, what branch or worktree they are using, and any notes left during the investigation.
 
+Radar creates one board per git repository. Multiple branches and worktrees share that board. Each terminal session gets its own agent card containing its current branch and worktree.
+
 It does not assign work or decide which changes should merge. It only shares context before agents start duplicating effort.
 
 ## Quick demo
@@ -116,7 +118,15 @@ ProjectBlaze also adds Claude Code contract generation, Cursor hooks, and daemon
 
 ## Branches and worktrees
 
-The board is keyed by git repository identity (`git rev-parse --git-common-dir`), not by checkout path. Two agents on different branches, or in different worktrees of the same repo, share one board. Branch and worktree path are stored on each card.
+The board answers: *who else is working in this repository?* Each card answers: *where is this agent, and what did they learn?*
+
+| Identity | Key | Meaning |
+|----------|-----|---------|
+| Repository | `git rev-parse --git-common-dir` | Which board |
+| Agent session | terminal tab (`sessionKey`) | Which card |
+| Card context | worktree, branch, task, notes | Where that agent is and what they report |
+
+Same repository → same board. Different agent session → different card. Worktree and branch are metadata on the card, not board keys.
 
 Radar is not a substitute for git. Git records code changes. Radar records what agents were investigating before those changes exist.
 
@@ -135,7 +145,7 @@ The board is live coordination state, not a static config file. Multiple agents 
 | What | Where |
 |------|--------|
 | Board (shared, per repository) | `~/.blaze/radar/workspaces/<repo-hash>/radar.blazedb` |
-| Session state (per agent tab) | `~/.blaze/radar/workspaces/<repo-hash>/agents/` |
+| Session state (per agent tab) | `~/.blaze/radar/workspaces/<repo-hash>/sessions/` + `agents/` |
 
 `repo-hash` is derived from the git common directory. Legacy boards at `<repo>/.blaze/radar/radar.blazedb` are migrated on first access.
 

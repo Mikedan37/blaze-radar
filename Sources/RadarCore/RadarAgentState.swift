@@ -1,6 +1,11 @@
 import Foundation
+#if canImport(Darwin)
+import Darwin
+#endif
 
-/// Per-agent CLI state — lives outside the repo. Workspace owns the board; agents own identity + sync cursor.
+/// Per-agent CLI state — lives outside the repo.
+///
+/// Board storage is keyed by repository identity. Session storage is keyed by agent/session identity.
 public enum RadarAgentState {
     public struct SessionFile: Codable, Equatable {
         public var agentId: String
@@ -60,26 +65,63 @@ public enum RadarAgentState {
         return root.appendingPathComponent("workspaces/\(hash)/by-name.json")
     }
 
-    private static func defaultAgentURL(workspacePath: String) -> URL {
+    private static func sessionBindingURL(workspacePath: String, sessionKey: String) -> URL {
         let hash = workspaceHash(workspacePath)
-        return root.appendingPathComponent("workspaces/\(hash)/default-agent.txt")
+        let safeKey = sessionKey.replacingOccurrences(of: "/", with: "_")
+        return root.appendingPathComponent("workspaces/\(hash)/sessions/\(safeKey).txt")
     }
 
-    public static func resolveAgentName(workspacePath: String, explicit: String?) -> String {
-        let normalized = (workspacePath as NSString).standardizingPath
+    /// Stable key for this shell session (tab/window).
+    public static func sessionKey() -> String {
+        let env = ProcessInfo.processInfo.environment
+        if let explicit = env["BLAZE_RADAR_SESSION"], !explicit.isEmpty {
+            return "env:\(explicit)"
+        }
+        for key in ["TERM_SESSION_ID", "ITERM_SESSION_ID", "WT_SESSION_ID", "CURSOR_TRACE_ID"] {
+            if let value = env[key], !value.isEmpty { return "\(key):\(value)" }
+        }
+        if let tty = env["TTY"], !tty.isEmpty, tty != "not a tty" {
+            return "tty:\(tty)"
+        }
+        return "shell:\(getppid())"
+    }
+
+    public static func resolveAgentName(workspacePath: String, explicit: String?, forceNew: Bool = false) -> String {
+        if let peeked = peekAgentName(workspacePath: workspacePath, explicit: explicit, forceNew: forceNew) {
+            return peeked
+        }
+        let generated = generateAgentName()
+        let normalized = WorkspacePath.canonical(workspacePath)
+        bindSession(workspacePath: normalized, sessionKey: sessionKey(), agentName: generated)
+        return generated
+    }
+
+    /// Read agent name without creating a new session identity.
+    public static func peekAgentName(workspacePath: String, explicit: String?, forceNew: Bool = false) -> String? {
+        let normalized = WorkspacePath.canonical(workspacePath)
         if let explicit, !explicit.isEmpty {
             return explicit
         }
-        let url = defaultAgentURL(workspacePath: normalized)
-        if let existing = try? String(contentsOf: url, encoding: .utf8)
-            .trimmingCharacters(in: .whitespacesAndNewlines),
-           !existing.isEmpty {
-            return existing
+        if forceNew {
+            return nil
         }
-        let generated = generateAgentName()
+        return loadSessionBinding(workspacePath: normalized, sessionKey: sessionKey())
+    }
+
+    private static func bindSession(workspacePath: String, sessionKey: String, agentName: String) {
+        let url = sessionBindingURL(workspacePath: workspacePath, sessionKey: sessionKey)
         try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try? generated.write(to: url, atomically: true, encoding: .utf8)
-        return generated
+        try? agentName.write(to: url, atomically: true, encoding: .utf8)
+    }
+
+    private static func loadSessionBinding(workspacePath: String, sessionKey: String) -> String? {
+        let url = sessionBindingURL(workspacePath: workspacePath, sessionKey: sessionKey)
+        guard let existing = try? String(contentsOf: url, encoding: .utf8)
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+              !existing.isEmpty else {
+            return nil
+        }
+        return existing
     }
 
     public static func generateAgentName() -> String {
@@ -108,6 +150,8 @@ public enum RadarAgentState {
 
     @discardableResult
     public static func saveSession(_ session: SessionFile) throws -> URL {
+        var session = session
+        session.workspace = WorkspacePath.canonical(session.workspace)
         let dir = agentDirectory(workspacePath: session.workspace, agentId: session.agentId)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let url = dir.appendingPathComponent("session.json")
@@ -116,6 +160,7 @@ public enum RadarAgentState {
         encoder.outputFormatting = [.sortedKeys]
         try encoder.encode(session).write(to: url, options: .atomic)
         try updateNameIndex(workspacePath: session.workspace, agentName: session.name, agentId: session.agentId)
+        bindSession(workspacePath: session.workspace, sessionKey: sessionKey(), agentName: session.name)
         return url
     }
 

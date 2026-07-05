@@ -3,7 +3,12 @@ import Foundation
 
 /// Stable repository identity for Radar board storage.
 ///
-/// The board belongs to a git repository (via `git rev-parse --git-common-dir`), not to an individual checkout path.
+/// Three separate axes:
+/// - **Repository identity** (`boardKey`) — which shared board? Derived from `git rev-parse --git-common-dir`.
+/// - **Agent/session identity** — which card? One per terminal tab (`RadarAgentState.sessionKey()`).
+/// - **Card context** — worktree path, branch, task, notes on the agent registration.
+///
+/// Same repository → same board. Different agent session → different card. Worktree and branch are metadata.
 public enum RepositoryIdentity {
     public static func boardKey(from checkoutPath: String) -> String {
         if let common = gitCommonDirectory(from: checkoutPath) {

@@ -23,7 +23,17 @@ final class RepositoryIdentityTests: XCTestCase {
         super.tearDown()
     }
 
-    func testGitWorktreesShareOneBoard() async throws {
+    func testDifferentSessionKeysProduceDifferentAgents() {
+        let ws = tempDir.path
+        setenv("BLAZE_RADAR_SESSION", "tab-a", 1)
+        let a = RadarAgentState.resolveAgentName(workspacePath: ws, explicit: nil)
+        setenv("BLAZE_RADAR_SESSION", "tab-b", 1)
+        let b = RadarAgentState.resolveAgentName(workspacePath: ws, explicit: nil)
+        XCTAssertNotEqual(a, b)
+        unsetenv("BLAZE_RADAR_SESSION")
+    }
+
+    func testSameRepoSameWorktreeDifferentAgentsShareBoard() async throws {
         let repoRoot = tempDir.appendingPathComponent("repo")
         let wtAuth = tempDir.appendingPathComponent("wt-auth")
         let wtUi = tempDir.appendingPathComponent("wt-ui")
@@ -61,6 +71,37 @@ final class RepositoryIdentityTests: XCTestCase {
         let dbUi = RepositoryIdentity.databaseURL(from: wtUi.path)
         XCTAssertEqual(dbAuth.path, dbUi.path)
         XCTAssertTrue(FileManager.default.fileExists(atPath: dbAuth.path))
+    }
+
+    func testSameFolderSameBranchTwoAgents() async throws {
+        let repoRoot = tempDir.appendingPathComponent("repo-same")
+        try FileManager.default.createDirectory(at: repoRoot, withIntermediateDirectories: true)
+        try runGit(["init"], in: repoRoot)
+        try runGit(["config", "user.email", "radar@test.local"], in: repoRoot)
+        try runGit(["config", "user.name", "Radar Test"], in: repoRoot)
+        try "hello".write(to: repoRoot.appendingPathComponent("README.md"), atomically: true, encoding: .utf8)
+        try runGit(["add", "README.md"], in: repoRoot)
+        try runGit(["commit", "-m", "init"], in: repoRoot)
+
+        let service = AwarenessService(store: BlazeDBAwarenessStore())
+        _ = try await service.register(
+            workspacePath: repoRoot.path,
+            agentName: "agent-a",
+            task: "auth bug",
+            branch: "main",
+            worktree: repoRoot.path
+        )
+        _ = try await service.register(
+            workspacePath: repoRoot.path,
+            agentName: "agent-b",
+            task: "frontend cleanup",
+            branch: "main",
+            worktree: repoRoot.path
+        )
+
+        let board = await service.getActiveWork(workspacePath: repoRoot.path)
+        XCTAssertEqual(board.registrations.count, 2)
+        XCTAssertEqual(Set(board.registrations.map(\.agentName)), ["agent-a", "agent-b"])
     }
 
     func testNonGitCheckoutFallsBackToCanonicalPath() {

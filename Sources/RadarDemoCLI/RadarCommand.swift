@@ -52,7 +52,7 @@ struct RadarRegisterCommand: AsyncParsableCommand {
     func run() async throws {
         let workspaceURL = try Workspace.resolve(workspace)
         let wsPath = workspaceURL.path
-        let agentName = RadarAgentState.resolveAgentName(workspacePath: wsPath, explicit: agent)
+        let agentName = RadarAgentState.resolveAgentName(workspacePath: wsPath, explicit: agent, forceNew: new)
         let worktreePath = worktree ?? workspaceURL.path
         if let worktree, !FileManager.default.fileExists(atPath: worktree) {
             fputs("Worktree not found: \(worktree)\n", stderr)
@@ -122,15 +122,16 @@ struct RadarSyncCommand: AsyncParsableCommand {
         abstract: "Checkpoint: heartbeat, git refresh, new findings since last sync"
     )
 
-    @Option(name: .long, help: "Agent name (auto-generated per workspace if omitted)") var agent: String?
+    @Option(name: .long, help: "Agent name (auto-generated per terminal tab if omitted)") var agent: String?
     @Option(name: .long, help: "Task for auto-registration when no session exists") var task: String = "observing"
     @Option(name: .long, help: "Workspace path") var workspace: String = "."
+    @Flag(name: .long, help: "Force a new agent identity for this terminal tab") var new: Bool = false
     @Flag(name: .long, help: "Output JSON") var json: Bool = false
 
     func run() async throws {
         let workspaceURL = try Workspace.resolve(workspace)
         let wsPath = workspaceURL.path
-        let agentName = RadarAgentState.resolveAgentName(workspacePath: wsPath, explicit: agent)
+        let agentName = RadarAgentState.resolveAgentName(workspacePath: wsPath, explicit: agent, forceNew: new)
 
         var autoRegistered = false
         var session = RadarAgentState.findSession(workspacePath: wsPath, agentName: agentName)
