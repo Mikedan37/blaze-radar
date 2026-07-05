@@ -95,6 +95,63 @@ There is no contradiction between “you need a daemon” and “you don’t nee
 - You need **one write-owning process** per machine when multiple agent sessions hit the board at once.
 - You do **not** need ProjectBlaze or AgentDaemon. Use **blaze-radar-demo-daemon** to try the flow here, embed RadarCore in your own app, or build your own host.
 
+### The demo stack is complete for coordination
+
+Cloning this repo gives you the full core loop today:
+
+```
+blaze-radar-demo → blaze-radar-demo-daemon → RadarCore → BlazeDB
+```
+
+That path uses the **same board engine** as private production. It proves the same behavior:
+
+- multiple agent sessions on one repository
+- shared board with one card per terminal session
+- `sync` (read board, heartbeat, git/branch awareness)
+- `note` (append findings)
+- branch and worktree on each card
+- persistence in `radar.blazedb` across daemon restarts
+
+ProjectBlaze does **not** change Radar semantics. It does not add a different board model or smarter coordination. It adds **automation and polish** around the same RadarCore APIs.
+
+**RadarCore solves shared workspace awareness. Hosts decide how automatic that workflow becomes.** ProjectBlaze is one host implementation, not a required upgrade.
+
+| | Public demo (this repo) | ProjectBlaze (private) |
+|--|-------------------------|-------------------------|
+| Board engine | RadarCore | RadarCore (same) |
+| Persistence | BlazeDB | BlazeDB (same) |
+| Sync / note model | Same | Same |
+| Wire protocol | JSON over Unix socket | BlazeBinary over agent socket |
+| Agent prompting | Manual (you or Claude) | `blaze radar install` + hooks/contracts |
+| Extra tooling | Demo CLI only | Doctor, session recovery polish, fix/plan/execute runtime |
+
+**What the demo does not ship** (because it lives in private ProjectBlaze):
+
+- automatic Claude/Cursor contract installation
+- generated `CLAUDE.md` radar instructions
+- hooks that force agents to sync before work
+- `blaze radar doctor` checks
+- production session recovery polish (terminal rebind when cache files are gone)
+- broader agent runtime commands outside Radar (`fix`, `plan`, `execute`, …)
+
+None of that changes what the board *is*. It changes how often agents hit the board without you asking.
+
+### Using the demo with Claude Code manually
+
+You do not need ProjectBlaze to coordinate agents. Tell Claude what to run:
+
+```
+Before starting work in this repo, run:
+  blaze-radar-demo radar sync --task "<what you are doing>"
+
+When you discover something worth sharing, run:
+  blaze-radar-demo radar note "<finding>"
+```
+
+Open a second terminal tab, run `blaze-radar-demo radar sync` there, and Claude sees the first session's task and notes on the shared board.
+
+ProjectBlaze automates those steps with `blaze radar install` and editor hooks. The underlying coordination is identical.
+
 ---
 
 ## Why BlazeDB?
@@ -150,7 +207,7 @@ ProjectBlaze uses **AgentDaemon** because it already is that local runtime for f
 
 ### What the demo stack is for
 
-`blaze-radar-demo` + `blaze-radar-demo-daemon` are the **public, self-contained** way to run the full CLI → host → RadarCore → BlazeDB flow. Same architecture as production (one writer), simpler wire protocol (JSON over Unix socket). You do not need ProjectBlaze to use them.
+`blaze-radar-demo` + `blaze-radar-demo-daemon` are the **public, self-contained** way to run the full CLI → host → RadarCore → BlazeDB flow. Same board semantics as production, simpler wire protocol (JSON over Unix socket). See [The demo stack is complete for coordination](#the-demo-stack-is-complete-for-coordination) above.
 
 ---
 
@@ -332,7 +389,7 @@ The demo host exposes `blaze-radar-demo radar …`. Other hosts use their own pr
 
 Use `radar sync --json` for machine-readable output.
 
-`install` (Claude contract, Cursor hooks) is a **ProjectBlaze host feature**, not part of this repo. See [ProjectBlaze](#projectblaze-private-production-reference) for context.
+`install` (Claude contract, Cursor hooks) is a **ProjectBlaze host feature**, not part of this repo. The demo supports the same sync/note loop with manual prompting. See [ProjectBlaze](#projectblaze-private-host-reference).
 
 Example registration (`radar sync --json`):
 
@@ -400,21 +457,21 @@ Radar does not manage agents. It gives them the environmental context humans nat
 
 ---
 
-## ProjectBlaze (private production reference)
+## ProjectBlaze (private host reference)
 
 [ProjectBlaze](https://github.com/Mikedan37/AgentCLI) is a **private** monorepo. It is not part of this repository and is not required to use Radar.
 
-It shows how one production host wires Radar into Claude Code and Cursor:
+Think of it as the **automatic seatbelt** around the same engine: RadarCore is the coordination model; ProjectBlaze wires that model into Claude Code and Cursor with less manual prompting.
 
 ```bash
-blaze radar install      # Claude/Cursor contract (host feature, not in this repo)
+blaze radar install      # writes contract + hooks (not in this repo)
 blaze radar sync --task "auth bug"
 blaze radar note "..."
 ```
 
-ProjectBlaze routes `blaze radar *` through **AgentDaemon** (single BlazeDB writer) into the same RadarCore APIs this repo defines.
+ProjectBlaze routes `blaze radar *` through **AgentDaemon** into the same RadarCore APIs this repo defines.
 
-**The production `blaze` binary is not available here.** Use `blaze-radar-demo` + `blaze-radar-demo-daemon`, or integrate RadarCore directly.
+**The production `blaze` binary is not available here.** Use `blaze-radar-demo` + `blaze-radar-demo-daemon`, prompt Claude manually, or integrate RadarCore directly.
 
 ---
 
