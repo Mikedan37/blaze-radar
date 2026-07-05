@@ -62,7 +62,7 @@ final class V03RegressionTests: XCTestCase {
             worktree: ws
         )
 
-        let dbPath = (ws as NSString).appendingPathComponent(".blaze/radar/radar.blazedb")
+        let dbPath = RepositoryIdentity.databaseURL(from: ws).path
         XCTAssertTrue(FileManager.default.fileExists(atPath: dbPath))
 
         await BlazeDBClientPool.shared.evict(workspacePath: ws)

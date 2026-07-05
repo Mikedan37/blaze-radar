@@ -37,7 +37,8 @@ rm -f "$SOCK"
 "$DAEMON" & DAEMON_PID=$!
 for i in {1..30}; do [[ -S "$SOCK" ]] && break; sleep 0.1; done
 [[ -S "$SOCK" ]] || fail "daemon not ready"
-[[ -f "$WORKSPACE/.blaze/radar/radar.blazedb" ]] && fail "db should not exist before register" || true
+[[ -f "$TEST_DIR/wt-a/.blaze/radar/radar.blazedb" ]] && fail "board must not live in worktree checkout" || true
+[[ -f "$TEST_DIR/wt-b/.blaze/radar/radar.blazedb" ]] && fail "board must not live in worktree checkout" || true
 
 F1="Found: missing attention arbiter, don't build another scheduler"
 F2="Found: attention slot already claimed by signup flow"

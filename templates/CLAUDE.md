@@ -63,8 +63,10 @@ Cursor hooks sync automatically. Disable: BLAZE_RADAR_HOOKS=0
 
 ```
 your-repo/CLAUDE.md     → your rules + [managed Radar block]
-your-repo/.blaze/radar/radar.blazedb
-~/.blaze/radar/         → per-terminal agent identity (private)
+~/.blaze/radar/workspaces/<repo-hash>/radar.blazedb   → shared board
+~/.blaze/radar/workspaces/<repo-hash>/agents/         → per-terminal identity (private)
 ```
+
+`repo-hash` is derived from `git rev-parse --git-common-dir`, so worktrees share one board.
 
 Re-run `blaze radar install` when the contract version bumps.

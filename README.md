@@ -4,7 +4,7 @@ Blaze Radar is a local coordination layer for running multiple AI coding agents 
 
 If you open three Claude Code sessions on one repo, each one starts with its own context. They do not know another session already investigated a bug, switched branches, or ruled out an approach.
 
-Radar gives those sessions a shared board stored in the repository. Agents can see who else is active, what branch or worktree they are using, and any notes left during the investigation.
+Radar gives those sessions a shared board. Agents can see who else is active, what branch or worktree they are using, and any notes left during the investigation.
 
 It does not assign work or decide which changes should merge. It only shares context before agents start duplicating effort.
 
@@ -74,12 +74,6 @@ This repo contains:
 
 There is no universal `radar` binary. Your host chooses the command prefix and how agents are prompted to sync.
 
-The board is stored at the git repository root:
-
-```
-<repo>/.blaze/radar/radar.blazedb
-```
-
 ## Building your own host
 
 RadarCore is the engine. A typical host adds:
@@ -122,9 +116,7 @@ ProjectBlaze also adds Claude Code contract generation, Cursor hooks, and daemon
 
 ## Branches and worktrees
 
-The board belongs to the repository, not to a branch. Two agents on `fix-auth` and `fix-ui` in the same repo read the same board. Branch name is stored on each card as metadata.
-
-Git worktrees are separate directories. A host should resolve them to the same repository workspace so agents do not end up with separate boards. Each card records the worktree path so you can see where another agent's checkout lives.
+The board is keyed by git repository identity (`git rev-parse --git-common-dir`), not by checkout path. Two agents on different branches, or in different worktrees of the same repo, share one board. Branch and worktree path are stored on each card.
 
 Radar is not a substitute for git. Git records code changes. Radar records what agents were investigating before those changes exist.
 
@@ -138,9 +130,14 @@ The board is live coordination state, not a static config file. Multiple agents 
 |-------|------|
 | **RadarCore** | Board state, sync semantics, note history |
 | **Host** | CLI, daemon, hooks — makes agents actually read the board |
-| **BlazeDB** | On-disk storage at `<repo>/.blaze/radar/radar.blazedb` |
+| **BlazeDB** | On-disk storage |
 
-Per-agent session state (identity, last sync snapshot) lives in `~/.blaze/radar/`. `done` removes your card from the active board; notes remain in the database.
+| What | Where |
+|------|--------|
+| Board (shared, per repository) | `~/.blaze/radar/workspaces/<repo-hash>/radar.blazedb` |
+| Session state (per agent tab) | `~/.blaze/radar/workspaces/<repo-hash>/agents/` |
+
+`repo-hash` is derived from the git common directory. Legacy boards at `<repo>/.blaze/radar/radar.blazedb` are migrated on first access.
 
 Design philosophy: keep the coordination layer simple and let agents stay smart. A host should surface the board before work starts; it should not block edits, assign tasks, or merge changes.
 

@@ -19,8 +19,9 @@ public actor AwarenessService {
         branch: String?,
         worktree: String?
     ) async throws -> AgentRegistration {
-        let ws = WorkspacePath.canonical(workspacePath)
-        let resolvedWorktree = WorkspacePath.canonical(worktree ?? ws)
+        let checkout = WorkspacePath.canonical(workspacePath)
+        let ws = boardKey(from: workspacePath)
+        let resolvedWorktree = WorkspacePath.canonical(worktree ?? checkout)
         let resolvedBranch = branch ?? detectBranch(worktree: resolvedWorktree) ?? "unknown"
 
         let registration = AgentRegistration(
@@ -37,7 +38,7 @@ public actor AwarenessService {
     }
 
     public func sync(workspacePath: String, registrationId: UUID?) async -> SyncResult {
-        let ws = WorkspacePath.canonical(workspacePath)
+        let ws = boardKey(from: workspacePath)
         await WorkspaceRegistry.shared.note(ws)
         var warnings: [String] = []
         var gitRefreshed = true
@@ -77,7 +78,7 @@ public actor AwarenessService {
     }
 
     public func getActiveWork(workspacePath: String, excludeId: UUID? = nil) async -> ActiveWorkSnapshot {
-        let ws = WorkspacePath.canonical(workspacePath)
+        let ws = boardKey(from: workspacePath)
         await refreshPresenceStatus(workspacePath: ws)
         var active = (try? await store.activeRegistrations(workspacePath: ws)) ?? []
         if let excludeId {
@@ -95,7 +96,7 @@ public actor AwarenessService {
         branch: String?,
         worktree: String?
     ) async throws -> AgentRegistration {
-        let ws = WorkspacePath.canonical(workspacePath)
+        let ws = boardKey(from: workspacePath)
         guard var reg = try await store.find(workspacePath: ws, id: registrationId) else {
             throw AwarenessError.registrationNotFound
         }
@@ -122,7 +123,7 @@ public actor AwarenessService {
     }
 
     public func update(workspacePath: String, registrationId: UUID, patch: UpdateAgentRequest) async throws -> AgentRegistration {
-        let ws = WorkspacePath.canonical(workspacePath)
+        let ws = boardKey(from: workspacePath)
         guard var reg = try await store.find(workspacePath: ws, id: registrationId) else {
             throw AwarenessError.registrationNotFound
         }
@@ -147,7 +148,7 @@ public actor AwarenessService {
     }
 
     public func markDone(workspacePath: String, registrationId: UUID) async throws -> AgentRegistration {
-        let ws = WorkspacePath.canonical(workspacePath)
+        let ws = boardKey(from: workspacePath)
         guard var reg = try await store.find(workspacePath: ws, id: registrationId) else {
             throw AwarenessError.registrationNotFound
         }
@@ -161,7 +162,7 @@ public actor AwarenessService {
 
     @discardableResult
     public func refreshGit(workspacePath: String, registrationId: UUID) async -> AgentRegistration? {
-        let ws = WorkspacePath.canonical(workspacePath)
+        let ws = boardKey(from: workspacePath)
         do {
             guard var reg = try await store.find(workspacePath: ws, id: registrationId),
                   reg.status.isOnBoard else { return nil }
@@ -188,7 +189,7 @@ public actor AwarenessService {
     }
 
     private func refreshGitForWorkspace(_ workspacePath: String) async -> GitRefreshOutcome {
-        let ws = WorkspacePath.canonical(workspacePath)
+        let ws = boardKey(from: workspacePath)
         let active: [AgentRegistration]
         do {
             active = try await store.activeRegistrations(workspacePath: ws)
@@ -218,7 +219,7 @@ public actor AwarenessService {
     }
 
     private func refreshPresenceStatus(workspacePath: String) async {
-        let ws = WorkspacePath.canonical(workspacePath)
+        let ws = boardKey(from: workspacePath)
         do {
             var all = try await store.load(workspacePath: ws)
             let now = Date()
@@ -250,9 +251,13 @@ public actor AwarenessService {
         GitObserver.observe(worktreePath: worktree)?.branch
     }
 
+    private func boardKey(from workspacePath: String) -> String {
+        RepositoryIdentity.boardKey(from: workspacePath)
+    }
+
     private func writeSummary(workspacePath: String, registration: AgentRegistration, final: Bool = false) throws {
         let safeBranch = registration.branch.replacingOccurrences(of: "/", with: "_")
-        let dir = URL(fileURLWithPath: workspacePath)
+        let dir = URL(fileURLWithPath: registration.worktree)
             .appendingPathComponent(".blaze/radar/\(safeBranch)", isDirectory: true)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
 

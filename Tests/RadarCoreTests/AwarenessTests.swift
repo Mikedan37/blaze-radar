@@ -102,7 +102,7 @@ final class AwarenessTests: XCTestCase {
 
     func testInfrastructurePathsFiltered() {
         XCTAssertTrue(RadarCoordinationPaths.isInfrastructure("CLAUDE.md"))
-        XCTAssertTrue(RadarCoordinationPaths.isInfrastructure(".blaze/radar/radar.blazedb"))
+        XCTAssertTrue(RadarCoordinationPaths.isInfrastructure(".blaze/radar/summary.md"))
         XCTAssertFalse(RadarCoordinationPaths.isInfrastructure("src/main.swift"))
         XCTAssertEqual(
             RadarCoordinationPaths.coordinationRelevant(["CLAUDE.md", ".blaze/", "src/Foo.swift"]),

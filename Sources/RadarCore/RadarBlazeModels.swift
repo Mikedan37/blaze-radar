@@ -136,10 +136,9 @@ public struct RadarSyncState: BlazeStorable, Sendable {
 }
 
 enum RadarDBPaths {
-    static let password = "BlazeRadar123!"
+    static let password = RepositoryIdentity.password
 
     static func databaseURL(workspacePath: String) -> URL {
-        URL(fileURLWithPath: workspacePath)
-            .appendingPathComponent(".blaze/radar/radar.blazedb")
+        RepositoryIdentity.databaseURL(from: workspacePath)
     }
 }

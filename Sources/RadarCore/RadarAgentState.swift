@@ -1,4 +1,3 @@
-import CryptoKit
 import Foundation
 
 /// Per-agent CLI state — lives outside the repo. Workspace owns the board; agents own identity + sync cursor.
@@ -47,9 +46,7 @@ public enum RadarAgentState {
     }
 
     public static func workspaceHash(_ workspacePath: String) -> String {
-        let normalized = (workspacePath as NSString).standardizingPath
-        let digest = SHA256.hash(data: Data(normalized.utf8))
-        return digest.prefix(3).map { String(format: "%02x", $0) }.joined()
+        RepositoryIdentity.workspaceHash(from: workspacePath)
     }
 
     public static func agentDirectory(workspacePath: String, agentId: String) -> URL {

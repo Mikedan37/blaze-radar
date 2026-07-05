@@ -7,9 +7,9 @@ public actor BlazeDBClientPool {
     private var clients: [String: BlazeDBClient] = [:]
 
     func client(workspacePath: String) throws -> BlazeDBClient {
-        let key = WorkspacePath.canonical(workspacePath)
+        let key = RepositoryIdentity.boardKey(from: workspacePath)
         if let existing = clients[key] { return existing }
-        let url = RadarDBPaths.databaseURL(workspacePath: key)
+        let url = RadarDBPaths.databaseURL(workspacePath: workspacePath)
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         let client = try BlazeDBClient(name: "radar", fileURL: url, password: RadarDBPaths.password)
         clients[key] = client
@@ -22,7 +22,7 @@ public actor BlazeDBClientPool {
 
     /// Close and drop the pooled client for a workspace (public for AgentDaemon planWork boundary).
     public func evict(workspacePath: String) async {
-        let key = WorkspacePath.canonical(workspacePath)
+        let key = RepositoryIdentity.boardKey(from: workspacePath)
         guard let client = clients.removeValue(forKey: key) else { return }
         try? client.close()
     }

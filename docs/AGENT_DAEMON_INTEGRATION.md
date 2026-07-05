@@ -90,14 +90,16 @@ Do not put agent identity or sync cursors in the repo.
 
 | | Location | Contents |
 |--|----------|----------|
-| **Shared** | `<workspace>/.blaze/radar.blazedb` | Board, findings, git observations |
+| **Shared** | `~/.blaze/radar/workspaces/{hash}/radar.blazedb` | Board, findings, git observations |
 | **Private** | `~/.blaze/radar/workspaces/{hash}/agents/{id}/` | `session.json`, `sync.json` |
+
+`{hash}` is derived from the git common directory, so branches and worktrees share one board.
 
 AgentCLI resolves sessions by `--agent` name. `register` resumes unless `--new`. Multiple parallel agents on one monorepo each get their own folder under `~/.blaze/radar/`.
 
 ## Storage
 
-- Production: `BlazeDBAwarenessStore` → `<workspace>/.blaze/radar.blazedb`
+- Production: `BlazeDBAwarenessStore` → `~/.blaze/radar/workspaces/{hash}/radar.blazedb`
 - Tests: inject `JSONAwarenessStore()` via `AwarenessService(store:)`
 
 `BlazeDBClientPool` ensures one client per workspace — multiple clients on the same file will crash.

@@ -20,7 +20,7 @@ public actor WorkspaceRegistry {
     }
 
     public func note(_ workspacePath: String) {
-        let normalized = WorkspacePath.canonical(workspacePath)
+        let normalized = RepositoryIdentity.boardKey(from: workspacePath)
         guard workspaces.insert(normalized).inserted else { return }
         persist()
     }
@@ -42,6 +42,6 @@ public actor WorkspaceRegistry {
               let state = try? JSONDecoder().decode(Persisted.self, from: data) else {
             return []
         }
-        return Set(state.workspaces.map { WorkspacePath.canonical($0) })
+        return Set(state.workspaces.map { RepositoryIdentity.boardKey(from: $0) })
     }
 }

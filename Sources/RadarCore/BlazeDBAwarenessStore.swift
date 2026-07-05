@@ -6,7 +6,7 @@ public actor BlazeDBAwarenessStore: AwarenessStoreProtocol {
     public init() {}
 
     private func canonical(_ workspacePath: String) -> String {
-        WorkspacePath.canonical(workspacePath)
+        RepositoryIdentity.boardKey(from: workspacePath)
     }
 
     private func matchesWorkspace(_ rowPath: String, canonical: String) -> Bool {
