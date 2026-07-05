@@ -8,97 +8,86 @@ A whiteboard. Not a project manager. Not Jira for bots.
 
 ---
 
-## Any git repo + a host CLI
+## What you're getting
 
-Radar works in **any git repository**. The board is created wherever you run it:
+This repo ships three things:
 
-```
-~/SomeRandomRepo/
-  .blaze/
-    radar/
-      radar.blazedb
-```
+| Piece | What it is |
+|-------|------------|
+| **RadarCore** | The engine — shared board state in BlazeDB |
+| **Demo host** | `blaze-radar-demo` — try it today, no other deps |
+| **Pattern** | How a host makes agents look at the board before work |
 
-You need two things:
-
-1. **A git repo** (the workspace — portable, repo-local)
-2. **A Radar host CLI** (the executable — *not* a universal `radar` binary)
+There is no universal `radar` binary. Your host chooses the prefix:
 
 ```
-any git repo  +  host CLI  =  Radar works
+your-tool radar sync
+your-tool radar note "..."
 ```
 
-The command prefix depends on the host. There is no standalone `radar` command in this repo.
+Radar works in **any git repo**. The board is created wherever you run it:
 
-| Host | Prefix |
-|------|--------|
-| **Demo** (this repo, after `swift build`) | `blaze-radar-demo radar …` |
-| **ProjectBlaze** | `blaze radar …` |
-| **Your integration** | whatever wraps RadarCore |
+```
+~/SomeRandomRepo/.blaze/radar/radar.blazedb
+```
 
 ---
 
-## Try it (demo host, any repo)
+## Try Radar today
+
+This repo includes a demo host.
 
 ```bash
 git clone https://github.com/Mikedan37/blaze-radar.git
-cd blaze-radar && swift build -c release
+cd blaze-radar
+swift build -c release
 export PATH="$PWD/.build/release:$PATH"
 blaze-radar-demo-daemon &
+```
 
-cd ~/SomeRandomRepo    # any git repo — not blaze-radar itself
+Then in **any git repo**:
+
+```bash
+cd ~/SomeRandomRepo
 
 blaze-radar-demo radar sync --task "auth bug"
-blaze-radar-demo radar note "Token refresh failing. DB is fine."
+blaze-radar-demo radar note "DB is not the issue"
 
 # second terminal, same repo
 blaze-radar-demo radar sync
 ```
 
----
-
-## Use it (ProjectBlaze host, any repo)
-
 ```bash
-# once per machine
-cd AgentCLI && make install && blaze daemon start
-
-# once per repo you care about
-cd ~/SomeRandomRepo
-blaze radar install
-
-blaze radar sync --task "fix auth"
-blaze radar note "DB is not the issue"
-blaze radar sync
-blaze radar done
+swift test
 ```
-
-`install` writes `CLAUDE.md` rules, `.cursor/hooks.json`, and `.blaze/radar/` into **that repo**. Without it, agents have to remember to sync — that's "please check the wiki" again.
 
 ---
 
 ## Commands
 
-Subcommands are the same on every host. Replace `<host>` with your prefix.
+Same subcommands on any host. The demo uses `blaze-radar-demo radar …`.
 
 | When | Command |
 |------|---------|
-| Start / read board | `<host> radar sync` |
-| Say what you're on | `<host> radar sync --task "auth bug"` |
-| Learned something | `<host> radar note "..."` |
-| Changed focus | `<host> radar sync --task "new task"` |
-| Finished | `<host> radar done` |
-| Peek (no heartbeat) | `<host> radar status` |
-| Wire adapters | `<host> radar install` *(ProjectBlaze and other full hosts)* |
+| Start / read board | `blaze-radar-demo radar sync` |
+| Say what you're on | `blaze-radar-demo radar sync --task "auth bug"` |
+| Learned something | `blaze-radar-demo radar note "..."` |
+| Changed focus | `blaze-radar-demo radar sync --task "new task"` |
+| Finished | `blaze-radar-demo radar done` |
+| Peek (no heartbeat) | `blaze-radar-demo radar status` |
 
-**Demo:** `blaze-radar-demo radar sync`  
-**ProjectBlaze:** `blaze radar sync`
+`install` (Claude contract, Cursor hooks) is a **host feature** — the demo does not include it. See [ProjectBlaze](#projectblaze-reference-host) for how a production host wires that up.
 
 ---
 
-## Embed RadarCore
+## Add Radar to your own agent tool
 
-Build your own host, point it at any repo:
+**RadarCore** is the engine. Build a host around it:
+
+- CLI
+- editor extension
+- agent runtime
+- daemon (single writer to BlazeDB)
 
 ```swift
 import RadarCore
@@ -116,7 +105,31 @@ let _ = await service.sync(workspacePath: "/path/to/any/repo", registrationId: r
 
 Storage is pluggable via `AwarenessStoreProtocol`. BlazeDB is the default.
 
+Your host decides the command. Your host decides how agents get nudged to sync (hooks, contract, manual). RadarCore just maintains the board.
+
 See [docs/AGENT_DAEMON_INTEGRATION.md](docs/AGENT_DAEMON_INTEGRATION.md).
+
+---
+
+## ProjectBlaze (reference host)
+
+[ProjectBlaze](https://github.com/Mikedan37/AgentCLI) is the private production host Radar was extracted from. **You do not need it to use RadarCore.**
+
+Internally it exposes:
+
+```bash
+blaze radar install
+blaze radar sync --task "auth bug"
+blaze radar note "..."
+```
+
+and adds:
+
+- Claude Code contract generation (`CLAUDE.md`)
+- Cursor hooks (sync + board on session start / before edit)
+- daemon integration via AgentDaemon
+
+That shows how a production host makes Radar automatic. Copy the pattern, not the binary.
 
 ---
 
@@ -125,10 +138,10 @@ See [docs/AGENT_DAEMON_INTEGRATION.md](docs/AGENT_DAEMON_INTEGRATION.md).
 | Layer | What |
 |-------|------|
 | **1. Primitive** | Shared state in BlazeDB — identity, location, notes |
-| **2. Adoption** | `install`, Claude contract, Cursor hooks — agents actually see it |
+| **2. Adoption** | Host wiring — contracts, hooks, CLI — agents actually see it |
 | **3. Later** | Merge/review tooling — not Radar |
 
-Layer 1 is the database. Layer 2 is what makes it useful. Hooks print the board — they do not block, assign, or decide.
+Layer 1 is the database. Layer 2 is what makes it useful. A good host prints the board before work — it does not block, assign, or decide.
 
 ---
 
@@ -149,10 +162,6 @@ Layer 1 is the database. Layer 2 is what makes it useful. Hooks print the board 
 ## Why BlazeDB?
 
 The board is **live coordination state**, not a config file. Multiple agents sync and post notes concurrently. BlazeDB provides safe concurrent access, appendable note history, and fast local storage — no cloud.
-
-```
-<any-repo>/.blaze/radar/radar.blazedb
-```
 
 ---
 
