@@ -34,7 +34,8 @@ enum GitObserver {
             }
         }
 
-        return GitObservation(branch: branch, headSHA: head, changedFiles: files.sorted())
+        let relevant = RadarCoordinationPaths.coordinationRelevant(files.sorted())
+        return GitObservation(branch: branch, headSHA: head, changedFiles: relevant)
     }
 
     private static func shell(_ cmd: String, _ args: [String]) -> (output: String, exitCode: Int32) {

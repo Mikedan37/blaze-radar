@@ -13,7 +13,7 @@ public enum RelatedAreaDetector {
     ]
 
     public static func analyze(_ registrations: [AgentRegistration]) -> (related: [RelatedAreaWarning], files: [FileOverlapWarning]) {
-        let active = registrations.filter { $0.status.isOnBoard }
+        let active = registrations.filter { $0.status.collisionRelevant }
         var related: [RelatedAreaWarning] = []
         var files: [FileOverlapWarning] = []
 
@@ -31,17 +31,19 @@ public enum RelatedAreaDetector {
             }
         }
 
-        var fileToAgents: [String: [(String, String)]] = [:]
+        var fileToAgents: [String: [(name: String, branch: String, worktree: String)]] = [:]
         for reg in active {
-            for path in reg.changedFiles {
-                fileToAgents[path, default: []].append((reg.agentName, reg.branch))
+            for path in RadarCoordinationPaths.coordinationRelevant(reg.changedFiles) {
+                fileToAgents[path, default: []].append((reg.agentName, reg.branch, reg.worktree))
             }
         }
         for (path, agents) in fileToAgents where agents.count > 1 {
+            let worktrees = Set(agents.map { WorkspacePath.canonical($0.worktree) })
+            guard worktrees.count > 1 else { continue }
             files.append(FileOverlapWarning(
                 path: path,
-                agentNames: agents.map(\.0),
-                branches: agents.map(\.1)
+                agentNames: agents.map(\.name),
+                branches: agents.map(\.branch)
             ))
         }
 
@@ -49,6 +51,10 @@ public enum RelatedAreaDetector {
     }
 
     private static func relatedReason(_ a: AgentRegistration, _ b: AgentRegistration) -> String? {
+        if RadarCoordinationPaths.shareWorktree(a, b) {
+            return semanticRelatedReason(a, b)
+        }
+
         let tokensA = tokens(for: a)
         let tokensB = tokens(for: b)
         let common = tokensA.intersection(tokensB)
@@ -69,12 +75,40 @@ public enum RelatedAreaDetector {
             return "Both affect signup timing / conversion surfaces"
         }
 
-        if pathPrefixOverlap(a.changedFiles, b.changedFiles) {
+        let filesA = RadarCoordinationPaths.coordinationRelevant(a.changedFiles)
+        let filesB = RadarCoordinationPaths.coordinationRelevant(b.changedFiles)
+
+        if pathPrefixOverlap(filesA, filesB) {
             return "Working in overlapping directories"
         }
 
-        if !Set(a.changedFiles).intersection(Set(b.changedFiles)).isEmpty {
+        if !Set(filesA).intersection(Set(filesB)).isEmpty {
             return "Both modifying same files"
+        }
+
+        return nil
+    }
+
+    /// Same worktree: git status is shared — only surface semantic collisions, not file overlap.
+    private static func semanticRelatedReason(_ a: AgentRegistration, _ b: AgentRegistration) -> String? {
+        let tokensA = tokens(for: a)
+        let tokensB = tokens(for: b)
+        let common = tokensA.intersection(tokensB)
+
+        if common.count >= 2 {
+            return "Shared terms: \(common.sorted().prefix(4).joined(separator: ", "))"
+        }
+
+        let signalsA = signalHits(tokensA)
+        let signalsB = signalHits(tokensB)
+        let sharedSignals = signalsA.intersection(signalsB)
+        if !sharedSignals.isEmpty {
+            return "Both affect \(sharedSignals.sorted().joined(separator: " / ")) surfaces"
+        }
+
+        if signalsA.contains(where: { signupFamily.contains($0) }) &&
+            signalsB.contains(where: { signupFamily.contains($0) }) {
+            return "Both affect signup timing / conversion surfaces"
         }
 
         return nil
@@ -85,7 +119,7 @@ public enum RelatedAreaDetector {
         "nudge", "conversion", "modal", "evidence", "arbiter", "scheduler", "timing",
     ]
 
-    public static func tokens(for registration: AgentRegistration) -> Set<String> {
+    private static func tokens(for registration: AgentRegistration) -> Set<String> {
         var text = registration.task
         if let hypothesis = registration.hypothesis { text += " " + hypothesis }
         text += " " + registration.discoveredFacts.joined(separator: " ")

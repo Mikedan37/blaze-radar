@@ -54,7 +54,9 @@ public actor AwarenessService {
                 if var reg = try await store.find(workspacePath: ws, id: registrationId),
                    reg.status.isOnBoard {
                     reg.lastSeen = Date()
-                    reg.status = .active
+                    if reg.status != .observing {
+                        reg.status = .active
+                    }
                     try await store.upsert(workspacePath: ws, registration: reg)
                     try await store.recordSync(workspacePath: ws, agentId: registrationId, at: Date())
                     heartbeatUpdated = true
@@ -103,11 +105,16 @@ public actor AwarenessService {
 
         let resolvedWorktree = worktree.map { WorkspacePath.canonical($0) } ?? reg.worktree
         let resolvedBranch = branch ?? detectBranch(worktree: resolvedWorktree) ?? reg.branch
-        reg.task = task
         reg.branch = resolvedBranch
         reg.worktree = resolvedWorktree
         reg.lastSeen = Date()
-        reg.status = .active
+        if task.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "observing" {
+            reg.task = "observing"
+            reg.status = .observing
+        } else {
+            reg.task = task
+            reg.status = .active
+        }
 
         try await store.upsert(workspacePath: ws, registration: reg)
         _ = await refreshGit(workspacePath: ws, registrationId: registrationId)
@@ -216,7 +223,7 @@ public actor AwarenessService {
             var all = try await store.load(workspacePath: ws)
             let now = Date()
             var changed = false
-            for idx in all.indices where all[idx].status.isOnBoard {
+            for idx in all.indices where all[idx].status.isOnBoard && all[idx].status != .observing {
                 let elapsed = now.timeIntervalSince(all[idx].lastSeen)
                 let newStatus: AgentRegistrationStatus
                 if elapsed <= activeInterval {

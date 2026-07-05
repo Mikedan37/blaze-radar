@@ -1,83 +1,186 @@
 # Blaze Radar
 
-**A team whiteboard for parallel AI agents.** (v0.3)
+**Add awareness to your existing AI coding agents.**
 
-When several agents work the same repo at once, they usually cannot see each other. Agent B rediscovers what Agent A already learned. Blaze Radar fixes that: a **shared board** of who is working on what, plus **findings** other agents can read before they duplicate effort.
+Multiple Claude Code or Cursor agents working in one repo cannot see each other. One window spends an hour on auth while another starts from zero, repeats the same investigation, or edits the same files without knowing anyone is already there.
 
-Think standup, not hive mind. Agents **pull** updates when they sync — nothing is pushed, nothing is assigned, nothing is merged for you.
-
-**Without Radar:**
-```
-10:00  Agent A discovers the scheduler already exists
-11:00  Agent B builds another scheduler
-```
-
-**With Radar:**
-```
-10:00  Agent A records the finding
-11:00  Agent B syncs
-11:01  Agent B changes approach
-```
+Radar gives them a shared local workspace board and installs the instructions and hooks that make them check it automatically.
 
 ---
 
-## What it does
+## Install once
 
-| You want to… | Radar gives you… |
-|--------------|------------------|
-| Say "I'm working on X" | **Registration** on a shared board (branch, task, worktree) |
-| Share a discovery mid-flight | **`update --found`** / **`--ruled-out`** (append-only learnings) |
-| See what changed since you last looked | **`sync`** — only **new** findings from others, plus full board |
-| See everyone active right now | **`active`** |
-| Leave the board | **`done`** |
-| Get a hint before overlapping work | **Warnings** (file overlap + lightweight topic match — hints, not locks) |
-
-**Success looks like:** Agent B reads Agent A's finding *before* spending hours on the same investigation.
-
-**It does not:** schedule work, claim files, auto-merge, or share one agent identity. Each agent has its own name and sync cursor. Warnings are hints — read the findings; don't expect semantic magic (`auth` vs `session` can still slip through).
-
----
-
-## Mental model
-
-```
-Engineer walks in  →  checks the standup board
-Engineer learns    →  writes it on the board
-Next engineer      →  reads the board before redoing the work
-```
-
-- **Board** (shared between local agents using the same workspace — lives in `<workspace>/.blaze/radar/`, not in git) — global truth for that workspace
-- **Your nametag** (private, in `~/.blaze/radar/`) — who you are and what you've already read
-
-Same monorepo, many agents → one board, many private cursors.
-
----
-
-## Zero setup mode (v0.3)
-
-Most of the time you only need:
+In your git repo:
 
 ```bash
-blaze radar doctor                    # preflight (recommended every session)
-blaze radar sync --workspace /path/to/repo
+radar install
 ```
 
-If you have no identity yet, sync will:
+Your CLI may prefix the command (`blaze radar install` in ProjectBlaze). Same idea everywhere: one install per repo.
 
-1. Create a generated agent name (e.g. `agent-a3f2`)
-2. Register you on the board
-3. Save your private cursor under `~/.blaze/radar/`
-4. Show the ACTIVE board
+That sets up:
 
-Use **`register`** when you want to set an explicit task up front or pick a stable `--agent` name. **`sync`** is the default entry point — including via `blaze run` / `blaze edit` hooks in ProjectBlaze.
+- A managed block in `CLAUDE.md` with rules for when to sync, when to record findings, and what to do before edits
+- Cursor hooks for session start, before edits, and before deploys
+- Local board storage under `.blaze/radar/`
 
-First sync captures a baseline: full board visible, nothing marked `+` yet. Later syncs show only **new** findings from others.
+The contract is the point. It does not ask agents to "remember to update the wiki." It tells them: sync at session start, record discoveries as you go, check the board before changing approach.
+
+After install, normal use should not feel like a checklist you maintain by hand.
+
+**What happens automatically:**
+
+- A new agent session starts → syncs and reads the board
+- An agent learns something mid-investigation → records it (because `CLAUDE.md` says to)
+- Before edits or deploys → checks for overlap
+- Another agent opens later → sees existing findings first
 
 ---
 
-## Quick start (try it locally)
+## What it looks like
 
-**Requirements:** macOS 15+, Swift 6+, git
+**10:00 — Claude window 1**
+
+```
+Working: fix auth
+Found:
+  Token refresh is failing. Database is fine.
+```
+
+**10:20 — Claude window 2 opens**
+
+```
+Radar:
+  Another agent is already working on auth.
+Known:
+  Token refresh is failing. Database is fine.
+```
+
+Claude changes direction instead of redoing the investigation.
+
+Will the second agent stop nuking the first agent's work? That is what Radar is for.
+
+---
+
+## Try it with two Claude sessions
+
+This is the proof. Hooks are great, but people trust what they can paste into a window.
+
+**Prerequisites:** `radar install` in the repo, Radar CLI on PATH, daemon running. Use a **new terminal tab** for each window so each session gets its own agent identity.
+
+Open the same repository in two Claude Code windows.
+
+### Claude window 1
+
+Paste:
+
+```text
+You are Agent A.
+
+Start by checking Radar:
+- run radar sync
+- read the active board
+
+Register that you are investigating authentication.
+
+Record anything important you discover with:
+radar update --found "..."
+
+Investigate why authentication is failing.
+```
+
+After it finds something:
+
+```text
+Record your current finding in Radar.
+```
+
+### Claude window 2
+
+Open a **second terminal tab**, start Claude in the same repo, paste:
+
+```text
+You are Agent B.
+
+Before touching code:
+- run radar sync
+- read every active agent and finding
+
+Another agent may already be investigating this.
+
+Your job:
+1. Check what Agent A has learned
+2. Avoid repeating completed investigation
+3. Either continue from their findings or choose a separate area
+
+Do not edit until you understand the current board.
+```
+
+### Expected behavior
+
+**Without Radar:** Agent B starts debugging auth from scratch.
+
+**With Radar:** Agent B sees:
+
+```
+Agent A:
+  Found: Token refresh is failing. Database is fine.
+```
+
+and continues from there.
+
+If window 2 only sees itself, open a new terminal tab (same session = same agent) or run `radar sync --new`.
+
+---
+
+## How Radar becomes automatic
+
+Once the manual test works, you should not need those prompts every time.
+
+**Claude Code**
+
+```
+CLAUDE.md (from radar install)
+        ↓
+agent reads Radar rules at session start
+        ↓
+runs sync before editing
+        ↓
+records findings when the contract says to
+```
+
+**Cursor**
+
+```
+.cursor/hooks.json (from radar install)
+        ↓
+session start  →  radar sync
+before edit    →  collision check
+before deploy  →  active work check
+```
+
+Hooks are advisory. They surface context; they do not block your editor. Disable with `BLAZE_RADAR_HOOKS=0` if needed.
+
+---
+
+## Manual commands
+
+For debugging or integrators. Day to day, the contract and hooks should handle this.
+
+| When | Command |
+|------|---------|
+| Start of session | `radar sync` |
+| Learned something | `radar update --found "..."` |
+| Ruled something out | `radar update --ruled-out "..."` |
+| Step back | `radar yield` |
+| Finished | `radar done` |
+| Dashboard | `radar status` |
+
+---
+
+## Try the board without agents (demo)
+
+**"Does this run?"** Use the demo host from this repo. No Claude required.
 
 ```bash
 git clone https://github.com/Mikedan37/blaze-radar.git
@@ -85,219 +188,63 @@ cd blaze-radar
 swift build -c release
 export PATH="$PWD/.build/release:$PATH"
 
-# Terminal 1 — start the demo host (keeps the board database open)
 blaze-radar-demo-daemon &
-
-# Terminal 2 — act as an agent (any git repo)
-cd /path/to/any/git/repo
-
-blaze-radar-demo radar sync --task "fix prompt scheduler"   # auto-registers if needed
-blaze-radar-demo radar update --found "Scheduler already uses cron in Sources/Scheduler"
-blaze-radar-demo radar sync
-blaze-radar-demo radar active
 ```
 
-In **ProjectBlaze**, the same commands are `blaze radar …` via AgentCLI + AgentDaemon. Semantics are identical; only the host binary differs.
-
-**ProjectBlaze build (required — source ≠ running binary):**
-
-```bash
-cd ProjectBlaze/AgentCLI
-swift build -c release
-source env.sh
-./scripts/radar-cli-smoke.sh    # must PASS — catches stale or unwired binaries
-blaze radar --help              # must list sync/active, NOT "Needs generation"
-```
-
-Do not use Homebrew `blaze` (0.1.x) for Radar. **Do not copy `templates/CLAUDE.md` by hand** — use distribution:
+**Terminal 1:**
 
 ```bash
 cd /path/to/your-repo
-blaze radar install      # once per repo — managed block in CLAUDE.md
-blaze radar doctor       # every agent session — binary, routing, contract version
-blaze radar sync --agent <your-name>
+blaze-radar-demo radar sync
+blaze-radar-demo radar update --found "Token refresh is failing. Database is fine."
 ```
 
-See [`templates/CLAUDE.md`](templates/CLAUDE.md) for the **reference shape** of what install writes. AgentCLI owns the canonical contract; install keeps repos aligned when the version bumps.
+**Terminal 2:**
+
+```bash
+cd /path/to/your-repo
+blaze-radar-demo radar sync
+```
+
+Terminal 2 should see Terminal 1's finding.
+
+```bash
+scripts/blaze-radar-sync-e2e.sh
+```
+
+The demo proves the board. `radar install` is what wires it into your agents day to day.
 
 ---
 
-## How to use it (agent workflow)
+## Build on RadarCore
 
-Pick a **stable name** per session (`agent-a`, `cursor-signup-fix`) if you use `--agent`. Otherwise sync will generate one for you.
+**"Can I embed this?"** This repo ships the engine.
 
-### 1. Register (optional — for an explicit task or name)
-
-```bash
-blaze radar register "fix signup interruptions" --agent agent-b \
-  --workspace /path/to/monorepo \
-  --worktree /path/to/your/worktree
-```
-
-Skip this if **`sync`** (or a run/edit hook) already auto-registered you. Use register when you want to describe your task before the first sync.
-
-- **`--workspace`** — repo root (where the shared board lives)
-- **`--worktree`** — where you're actually editing (defaults to workspace)
-- **`--branch`** — optional; detected from git if omitted
-- **`--agent`** — your stable name; **re-running register resumes** the same session
-- **`--new`** — force a fresh registration (rare)
-
-If you skip `--agent`, a generated name like `agent-a3f2` is created per workspace.
-
-### 2. Sync often (your checkpoint)
-
-```bash
-blaze radar sync --agent agent-b
-```
-
-Every sync:
-
-1. Refreshes git state for registered worktrees
-2. Updates your heartbeat (so others see you're still active)
-3. Shows **NEW since last sync** — only findings you haven't seen
-4. Prints the full **ACTIVE** board
-
-**When to sync:** every ~15 minutes, before changing approach, before editing a risky area.
-
-Example output shape:
-
-```
-SYNC @ 2026-07-05T04:00:00Z
-✓ synced findings
-✓ git refresh
-✓ heartbeat updated
-
-NEW since last sync:
-  agent-a (fix/scheduler)
-    Found:
-      + Scheduler already uses cron — do not duplicate
-
----
-
-ACTIVE
-
-agent-a
-  Branch: fix/scheduler
-  Goal:
-    fix prompt scheduler
-  Learned:
-    Scheduler already uses cron — do not duplicate
-
-agent-b
-  Branch: fix/signup
-  Goal:
-    fix signup interruptions
-```
-
-On your **first** sync, the full board is shown and nothing is marked `+` — that's your baseline. Later syncs show only new deltas.
-
-### 3. Record learnings as you go
-
-```bash
-blaze radar update --found "Found: X is the root cause" --agent agent-b
-blaze radar update --ruled-out "NOT a database lock issue" --agent agent-b
-blaze radar update --hypothesis "Likely race in checkout flow" --agent agent-b
-```
-
-Findings are **append-only**. Other agents see them on their next sync.
-
-### 4. Check the board anytime
-
-```bash
-blaze radar active --workspace /path/to/monorepo
-```
-
-No delta, no heartbeat — just who's active and what they reported.
-
-### 5. Finish cleanly
-
-```bash
-blaze radar done --agent agent-b
-```
-
-Marks you done; you drop off the active board. History is preserved.
-
----
-
-## Two agents, one repo (the scenario this exists for)
-
-```bash
-# Agent A — scheduler worktree
-blaze radar register "fix prompt scheduler" --agent agent-a --worktree ./wt-scheduler
-blaze radar update --found "Found: missing attention arbiter — do NOT build another scheduler" --agent agent-a
-
-# Agent B — signup worktree (different files, related problem space)
-blaze radar register "fix signup interruptions" --agent agent-b --worktree ./wt-signup
-blaze radar sync --agent agent-b
-# → sees A's finding on the board before building overlapping scheduler logic
-```
-
-Run `scripts/blaze-radar-sync-e2e.sh` to prove the two-agent delta behavior on the demo stack.
-
----
-
-## Adoption (ProjectBlaze + multi-repo)
-
-**Once per git repo** — install the coordination contract (no copy-paste drift):
-
-```bash
-blaze radar install
-```
-
-Writes a version-stamped managed block into `CLAUDE.md`:
-
-```
-<!-- BEGIN BLAZE RADAR -->
-Radar contract: v0.3
-Installed by AgentCLI: abc1234
-Updated: 2026-07-04
-...
-<!-- END BLAZE RADAR -->
-```
-
-Project-specific rules stay outside the markers. Re-run `install` when `doctor` reports an outdated contract.
-
-**Every agent session:**
-
-```bash
-blaze radar doctor
-blaze radar sync --agent <your-name>
-```
-
-If you use `blaze run` / `blaze edit`, radar can sync **automatically** at session start. Disable with:
-
-```bash
-BLAZE_RADAR_HOOKS=0 blaze run "..."
-```
-
-Full distribution docs: `AgentCLI/Docs/Radar.md` in ProjectBlaze.
-
----
-
-## For framework integrators
-
-This repo ships **`RadarCore`** — the coordination logic. A **host process** (AgentDaemon, or `blaze-radar-demo-daemon`) holds the database connection and forwards requests.
+| Piece | Purpose |
+|-------|---------|
+| **RadarCore** | Presence, findings, sync, collisions |
+| **Demo CLI + daemon** | Local try-it host |
+| **docs/** | Host and storage wiring |
 
 ```swift
 import RadarCore
 
 let service = AwarenessService()
-
 let reg = try await service.register(
-    workspacePath: workspace,
+    workspacePath: "/path/to/repo",
     agentName: "agent-a",
-    task: "fix prompt scheduler",
+    task: "fix auth",
     branch: nil,
-    worktree: workspace
+    worktree: "/path/to/repo"
 )
-
-let result = await service.sync(workspacePath: workspace, registrationId: reg.id)
-let board = await service.getActiveWork(workspacePath: workspace, excludeId: nil)
+let _ = await service.sync(workspacePath: "/path/to/repo", registrationId: reg.id)
 ```
 
-Storage is pluggable via `AwarenessStoreProtocol` (production: `BlazeDBAwarenessStore`).
+See [docs/AGENT_DAEMON_INTEGRATION.md](docs/AGENT_DAEMON_INTEGRATION.md). ProjectBlaze is one production host; it is not required.
 
-Host wiring (RPC, poller, single-writer rules): [docs/AGENT_DAEMON_INTEGRATION.md](docs/AGENT_DAEMON_INTEGRATION.md).
+```bash
+swift test
+```
 
 ---
 
@@ -305,58 +252,13 @@ Host wiring (RPC, poller, single-writer rules): [docs/AGENT_DAEMON_INTEGRATION.m
 
 | What | Where |
 |------|--------|
-| Shared board | `<workspace>/.blaze/radar/radar.blazedb` |
-| Branch summaries | `<workspace>/.blaze/radar/<branch>/summary.md` (derived) |
-| Your identity | `~/.blaze/radar/workspaces/{hash}/agents/{id}/session.json` |
-| Your sync cursor | `~/.blaze/radar/.../sync.json` |
+| Shared board | `<repo>/.blaze/radar/` |
+| Per-agent identity | `~/.blaze/radar/` |
 
-Add `.blaze/` to `.gitignore`. The shared board is **local runtime state**, not source code — it is not meant to be committed.
-
-Agent identities and sync cursors live **outside the repo** under `~/.blaze/radar/`. Never copy those between agents or machines; each agent owns its own cursor.
-
----
-
-## Commands reference
-
-| Command | What it does |
-|---------|----------------|
-| `install` | Install/update managed Radar contract in `CLAUDE.md` (AgentCLI) |
-| `doctor` | Preflight: binary, routing, daemon, contract version (AgentCLI) |
-| `register "<task>"` | Join or resume on the board |
-| `sync` | Heartbeat + git + new deltas + ACTIVE |
-| `active` | ACTIVE board only |
-| `update --found "…"` | Add a discovery |
-| `update --ruled-out "…"` | Record a ruled-out hypothesis |
-| `done` | Mark your registration complete |
-
-Common flags: `--workspace`, `--worktree`, `--branch`, `--agent`, `--new` (register only). `doctor --strict` exits non-zero on failure (CI).
-
----
-
-## Verify
-
-```bash
-swift test
-scripts/blaze-radar-sync-e2e.sh
-```
-
-**ProjectBlaze (AgentCLI):** after `swift build -c release` in `AgentCLI/`:
-
-```bash
-./scripts/radar-cli-smoke.sh
-```
-
----
-
-## Environment
-
-| Variable | Default | Purpose |
-|----------|---------|---------|
-| `BLAZE_RADAR_SOCKET` | `/tmp/blaze_radar.sock` | Demo daemon socket |
-| `BLAZE_RADAR_HOOKS` | `1` | ProjectBlaze: `0` disables run/edit hooks |
+Add `.blaze/` to `.gitignore`.
 
 ---
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT. See [LICENSE](LICENSE).

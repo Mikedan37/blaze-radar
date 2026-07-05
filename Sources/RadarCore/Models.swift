@@ -2,6 +2,7 @@ import Foundation
 
 public enum AgentRegistrationStatus: String, Codable, Sendable {
     case active
+    case observing
     case idle
     case stale
     case done
@@ -9,8 +10,16 @@ public enum AgentRegistrationStatus: String, Codable, Sendable {
 
     public var isOnBoard: Bool {
         switch self {
-        case .active, .idle, .stale: return true
+        case .active, .observing, .idle, .stale: return true
         case .done, .withdrawn: return false
+        }
+    }
+
+    /// Agents in observing mode stay visible but do not trigger collision warnings.
+    public var collisionRelevant: Bool {
+        switch self {
+        case .active, .idle, .stale: return true
+        case .observing, .done, .withdrawn: return false
         }
     }
 }

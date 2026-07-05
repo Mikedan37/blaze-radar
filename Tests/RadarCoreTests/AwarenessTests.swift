@@ -67,10 +67,54 @@ final class AwarenessTests: XCTestCase {
     }
 
     func testRelatedAreaDetection() {
-        let a = AgentRegistration(agentName: "A", task: "fix signup prompts", branch: "fix/a", worktree: "/tmp")
-        let b = AgentRegistration(agentName: "B", task: "fix overlay interruptions", branch: "fix/b", worktree: "/tmp")
+        let a = AgentRegistration(agentName: "A", task: "fix signup prompts", branch: "fix/a", worktree: "/tmp/a")
+        let b = AgentRegistration(agentName: "B", task: "fix overlay interruptions", branch: "fix/b", worktree: "/tmp/b")
         let result = RelatedAreaDetector.analyze([a, b])
         XCTAssertFalse(result.related.isEmpty)
+    }
+
+    func testSameWorktreeInfrastructureOverlapIgnored() {
+        let ws = "/Users/test/RadarTest"
+        var a = AgentRegistration(agentName: "agent-4020", task: "working on auth", branch: "main", worktree: ws)
+        var b = AgentRegistration(agentName: "agent-4021", task: "observing", branch: "main", worktree: ws)
+        a.changedFiles = ["CLAUDE.md", ".blaze/", "README.md"]
+        b.changedFiles = ["CLAUDE.md", ".blaze/", "README.md"]
+
+        let result = RelatedAreaDetector.analyze([a, b])
+        XCTAssertTrue(result.files.isEmpty, "same worktree should not file-overlap on shared git status")
+        XCTAssertTrue(
+            result.related.isEmpty || !result.related.contains(where: { $0.reason.contains("modifying same files") }),
+            "infrastructure-only overlap should not warn about modifying same files"
+        )
+    }
+
+    func testDifferentWorktreeRealOverlapStillWarns() {
+        var a = AgentRegistration(agentName: "A", task: "auth", branch: "fix/a", worktree: "/tmp/wt-a")
+        var b = AgentRegistration(agentName: "B", task: "billing", branch: "fix/b", worktree: "/tmp/wt-b")
+        a.changedFiles = ["src/AuthService.swift"]
+        b.changedFiles = ["src/AuthService.swift"]
+
+        let result = RelatedAreaDetector.analyze([a, b])
+        XCTAssertEqual(result.files.count, 1)
+        XCTAssertEqual(result.files[0].path, "src/AuthService.swift")
+    }
+
+    func testInfrastructurePathsFiltered() {
+        XCTAssertTrue(RadarCoordinationPaths.isInfrastructure("CLAUDE.md"))
+        XCTAssertTrue(RadarCoordinationPaths.isInfrastructure(".blaze/radar/radar.blazedb"))
+        XCTAssertFalse(RadarCoordinationPaths.isInfrastructure("src/main.swift"))
+        XCTAssertEqual(
+            RadarCoordinationPaths.coordinationRelevant(["CLAUDE.md", ".blaze/", "src/Foo.swift"]),
+            ["src/Foo.swift"]
+        )
+    }
+
+    func testObservingAgentsExcludedFromCollisions() {
+        var active = AgentRegistration(agentName: "agent-a", task: "fixing auth middleware", branch: "main", worktree: "/tmp/a")
+        active.discoveredFacts = ["token refresh bug"]
+        var observing = AgentRegistration(agentName: "agent-b", task: "auth refactor", branch: "main", worktree: "/tmp/a", status: .observing)
+        let result = RelatedAreaDetector.analyze([active, observing])
+        XCTAssertTrue(result.related.isEmpty)
     }
 
     func testBlazeDBPersistsAcrossReopen() async throws {
