@@ -25,11 +25,17 @@ your-tool radar sync
 your-tool radar note "..."
 ```
 
-Radar works in **any git repo**. The board is created wherever you run it:
+Radar works in **any git repo**. The board lives at the **repository root** — not on a branch:
 
 ```
-~/SomeRandomRepo/.blaze/radar/radar.blazedb
+MyApp/
+  .git/
+  .blaze/
+    radar/
+      radar.blazedb
 ```
+
+All agents working in that repo share one board, no matter which branch they're on.
 
 ---
 
@@ -159,6 +165,61 @@ Layer 1 is the database. Layer 2 is what makes it useful. A good host prints the
 
 ---
 
+## Branches and worktrees
+
+Radar follows the **repository**, not the branch.
+
+Two agents on different branches still share one board:
+
+```bash
+# Terminal 1
+cd ~/MyApp
+git checkout fix-auth
+blaze-radar-demo radar sync --task "fix auth"
+blaze-radar-demo radar note "Token refresh is failing"
+
+# Terminal 2 — same repo, different branch
+cd ~/MyApp
+git checkout fix-ui
+blaze-radar-demo radar sync --task "fix UI"
+```
+
+```
+BOARD
+agent-a
+branch: fix-auth
+working: fix auth
+notes:
+- Token refresh is failing
+agent-b
+branch: fix-ui
+working: fix UI
+```
+
+Branch is metadata on the card. The board lives above branches.
+
+| | Tracks |
+|---|--------|
+| **Git** | Code changes per branch |
+| **Radar** | Who is doing what across branches in one repo |
+
+### Worktrees
+
+Git worktrees are separate folders:
+
+```
+~/project-auth/   (branch auth)
+~/project-ui/     (branch ui)
+```
+
+Without care, each folder could get its own `.blaze/radar/` — two whiteboards in two rooms. Hosts resolve worktrees to the **same repository workspace** so agents still share one board. Each card stores **repo root**, **worktree path**, and **branch**, so you can see where another agent's changes actually live.
+
+### Why not just git?
+
+**Git tells you the final diff. Radar tells you the investigation happening before the diff exists.**
+
+---
+
 ## Why BlazeDB?
 
 The board is **live coordination state**, not a config file. Multiple agents sync and post notes concurrently. BlazeDB provides safe concurrent access, appendable note history, and fast local storage — no cloud.
@@ -172,7 +233,7 @@ The board is **live coordination state**, not a config file. Multiple agents syn
 | Board (shared, per repo) | `<repo>/.blaze/radar/radar.blazedb` |
 | Your session (private) | `~/.blaze/radar/` |
 
-One board per git repo. One agent identity per terminal tab. `done` removes your card from the **active** board; notes stay in the database.
+One board per git repository root. One agent identity per terminal tab. `done` removes your card from the **active** board; notes stay in the database.
 
 ---
 
