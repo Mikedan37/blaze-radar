@@ -58,6 +58,7 @@ Same monorepo, many agents → one board, many private cursors.
 Most of the time you only need:
 
 ```bash
+blaze radar doctor                    # preflight (recommended every session)
 blaze radar sync --workspace /path/to/repo
 ```
 
@@ -108,7 +109,16 @@ source env.sh
 blaze radar --help              # must list sync/active, NOT "Needs generation"
 ```
 
-Do not use Homebrew `blaze` (0.1.x) for Radar. Copy [`templates/CLAUDE.md`](templates/CLAUDE.md) into a repo for agent playbooks.
+Do not use Homebrew `blaze` (0.1.x) for Radar. **Do not copy `templates/CLAUDE.md` by hand** — use distribution:
+
+```bash
+cd /path/to/your-repo
+blaze radar install      # once per repo — managed block in CLAUDE.md
+blaze radar doctor       # every agent session — binary, routing, contract version
+blaze radar sync --agent <your-name>
+```
+
+See [`templates/CLAUDE.md`](templates/CLAUDE.md) for the **reference shape** of what install writes. AgentCLI owns the canonical contract; install keeps repos aligned when the version bumps.
 
 ---
 
@@ -226,17 +236,41 @@ Run `scripts/blaze-radar-sync-e2e.sh` to prove the two-agent delta behavior on t
 
 ---
 
-## Adoption hooks (ProjectBlaze)
+## Adoption (ProjectBlaze + multi-repo)
 
-If you use `blaze run` / `blaze edit`, radar can sync **automatically** at session start (register if needed, then sync). Warnings print on stderr when related work exists.
+**Once per git repo** — install the coordination contract (no copy-paste drift):
 
-Disable with:
+```bash
+blaze radar install
+```
+
+Writes a version-stamped managed block into `CLAUDE.md`:
+
+```
+<!-- BEGIN BLAZE RADAR -->
+Radar contract: v0.3
+Installed by AgentCLI: abc1234
+Updated: 2026-07-04
+...
+<!-- END BLAZE RADAR -->
+```
+
+Project-specific rules stay outside the markers. Re-run `install` when `doctor` reports an outdated contract.
+
+**Every agent session:**
+
+```bash
+blaze radar doctor
+blaze radar sync --agent <your-name>
+```
+
+If you use `blaze run` / `blaze edit`, radar can sync **automatically** at session start. Disable with:
 
 ```bash
 BLAZE_RADAR_HOOKS=0 blaze run "..."
 ```
 
-Copy [`templates/CLAUDE.md`](templates/CLAUDE.md) into a repo so agents know the playbook.
+Full distribution docs: `AgentCLI/Docs/Radar.md` in ProjectBlaze.
 
 ---
 
@@ -286,6 +320,8 @@ Agent identities and sync cursors live **outside the repo** under `~/.blaze/rada
 
 | Command | What it does |
 |---------|----------------|
+| `install` | Install/update managed Radar contract in `CLAUDE.md` (AgentCLI) |
+| `doctor` | Preflight: binary, routing, daemon, contract version (AgentCLI) |
 | `register "<task>"` | Join or resume on the board |
 | `sync` | Heartbeat + git + new deltas + ACTIVE |
 | `active` | ACTIVE board only |
@@ -293,7 +329,7 @@ Agent identities and sync cursors live **outside the repo** under `~/.blaze/rada
 | `update --ruled-out "…"` | Record a ruled-out hypothesis |
 | `done` | Mark your registration complete |
 
-Common flags: `--workspace`, `--worktree`, `--branch`, `--agent`, `--new` (register only).
+Common flags: `--workspace`, `--worktree`, `--branch`, `--agent`, `--new` (register only). `doctor --strict` exits non-zero on failure (CI).
 
 ---
 
