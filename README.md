@@ -6,7 +6,7 @@ If you open three Claude Code sessions on one repo, each one starts with its own
 
 Radar gives those sessions a shared board. Agents can see who else is active, what branch or worktree they are using, and any notes left during the investigation.
 
-Radar creates one board per git repository. Multiple branches and worktrees share that board. Each terminal session gets its own agent card containing its current branch and worktree.
+Radar creates one board per git repository identity. Branches and git worktrees share that board because they point back to the same underlying repository. Each terminal session gets its own agent card containing its current branch and worktree.
 
 It does not assign work or decide which changes should merge. It only shares context before agents start duplicating effort.
 
@@ -36,8 +36,6 @@ blaze-radar-demo radar sync   # sees both cards on one board
 
 Each terminal tab gets its own agent identity automatically. To force a new card in the same tab: `blaze-radar-demo radar sync --new`.
 
-Run tests:
-
 ```bash
 swift test
 ```
@@ -55,7 +53,7 @@ The demo host exposes `blaze-radar-demo radar …`. Other hosts use their own pr
 | `radar done` | Remove your card from the active board |
 | `radar status` | Read the board without updating heartbeat |
 
-Use `radar sync --json` for machine-readable output (`registrations`, `relatedAreas`, `fileOverlaps`).
+Use `radar sync --json` for machine-readable output.
 
 `install` (Claude contract, Cursor hooks) is implemented by the host, not by the demo. See [ProjectBlaze](#projectblaze) for one production example.
 
@@ -73,15 +71,13 @@ A registration on the board (`radar sync --json`) looks like this:
 }
 ```
 
-Notes from `radar note` append to `discoveredFacts`. Other fields (`negatedHypotheses`, `changedFiles`, etc.) are available for richer host integrations.
+Notes from `radar note` append to `discoveredFacts`.
 
 ## Repository contents
 
-This repo contains:
-
 | Piece | Description |
 |-------|-------------|
-| **RadarCore** | Shared board state in BlazeDB |
+| **RadarCore** | Shared board state |
 | **Demo host** | `blaze-radar-demo` and `blaze-radar-demo-daemon` |
 | **Integration docs** | How to wire RadarCore into your own agent runtime |
 
@@ -92,10 +88,8 @@ There is no universal `radar` binary. Your host chooses the command prefix and h
 RadarCore is the engine. A typical host adds:
 
 - a CLI or RPC surface
-- a **daemon with a single BlazeDB writer** (agents queue writes; avoids concurrent write races)
+- a daemon that owns the BlazeDB writer
 - optional hooks or contracts so agents sync before work
-
-The demo uses `blaze-radar-demo-daemon` the same way. For a minimal in-process integration:
 
 ```swift
 import RadarCore
@@ -111,11 +105,20 @@ let reg = try await service.register(
 let _ = await service.sync(workspacePath: "/path/to/repo", registrationId: reg.id)
 ```
 
-Hosts must resolve `workspacePath` from any checkout (including worktrees) to the same repository board key. See `RepositoryIdentity.boardKey(from:)` in RadarCore.
-
 Storage is pluggable via `AwarenessStoreProtocol`. BlazeDB is the default.
 
 See [docs/AGENT_DAEMON_INTEGRATION.md](docs/AGENT_DAEMON_INTEGRATION.md).
+
+## Why not a JSON file?
+
+Radar is shared runtime state. Multiple agents may sync and write notes at the same time.
+
+BlazeDB gives Radar:
+
+- serialized writes through a host daemon
+- local storage
+- appendable history
+- no server requirement
 
 ## ProjectBlaze
 
@@ -133,73 +136,44 @@ ProjectBlaze also adds Claude Code contract generation, Cursor hooks, and daemon
 
 ## Branches and worktrees
 
-The board answers: *who else is working in this repository?* Each card answers: *where is this agent, and what did they learn?*
-
-| Identity | Key | Meaning |
-|----------|-----|---------|
-| Repository | `git rev-parse --git-common-dir` | Which board |
-| Agent session | terminal tab (`sessionKey`) | Which card |
-| Card context | worktree, branch, task, notes | Where that agent is and what they report |
-
-Same repository → same board. Different agent session → different card. Worktree and branch are metadata on the card, not board keys.
+Same git repository identity → same board. Different agent session → different card. Branch and worktree path are fields on the card, not board keys.
 
 Radar is not a substitute for git. Git records code changes. Radar records what agents were investigating before those changes exist.
 
 ## Nested git repositories
 
-Worktrees share one board because they share one git identity. **Nested repos do not.**
+Radar's boundary is git identity.
+
+Worktrees:
+
+```
+repo-auth/
+repo-ui/
+```
+
+share one board because they belong to the same git repository.
+
+Nested repositories:
 
 ```
 MegaProject/
-  .git/                 ← parent repo board
+  .git/
   Frontend/
-    .git/               ← separate board
+    .git/
   Backend/
-    .git/               ← separate board
+    .git/
 ```
 
-An agent in `MegaProject/Frontend` coordinates on the **Frontend** board. An agent in `MegaProject/Backend` coordinates on the **Backend** board. They cannot see each other, and that is intentional for v1.
-
-**Coordination boundary = git identity.** Radar does not infer that nested folders are "related." That would require workspace groups, parent-child boards, and cross-repo discovery — out of scope.
-
-| Goal | Where to run agents |
-|------|---------------------|
-| One board for the whole tree | Run from the **parent repo root** (`MegaProject/`). Cards can still record different worktree paths and tasks. |
-| Isolated coordination per sub-repo | Run from each **child repo** (`Frontend/`, `Backend/`). Each gets its own board. |
-
-Example — monorepo-level board with agents working in different areas:
-
-```
-MegaProject board
-  agent-a   worktree: MegaProject/   task: frontend auth
-  agent-b   worktree: MegaProject/   task: backend API
-```
-
-A host may eventually warn when a nested `.git` is detected and a parent repo exists. That is a hint, not automatic merging. For now, **you choose which repository identity agents coordinate in** by where you start them.
-
-## Why BlazeDB
-
-The board is live coordination state, not a static config file. Multiple agents sync and append notes concurrently. BlazeDB provides local concurrent access and appendable history without a cloud service.
+create separate boards. This is intentional. If you want agents to share context, start them from the same repository boundary.
 
 ## Internals
 
-| Layer | Role |
-|-------|------|
-| **RadarCore** | Board state, sync semantics, note history |
-| **Host daemon** | Single writer to BlazeDB; serializes concurrent agent updates |
-| **Host CLI / hooks** | Makes agents actually read the board before work |
-| **BlazeDB** | On-disk storage |
-
 | What | Where |
 |------|--------|
-| Board (shared, per repository) | `~/.blaze/radar/workspaces/<repo-hash>/radar.blazedb` |
+| Board (per repository identity) | `~/.blaze/radar/workspaces/<repo-hash>/radar.blazedb` |
 | Session state (per agent tab) | `~/.blaze/radar/workspaces/<repo-hash>/sessions/` + `agents/` |
 
-`repo-hash` is derived from the git common directory. Legacy boards at `<repo>/.blaze/radar/radar.blazedb` are migrated on first access.
-
-Multiple agents can call sync concurrently; the daemon commits writes in order so every agent sees a consistent board state.
-
-Design philosophy: keep the coordination layer simple and let agents stay smart. A host should surface the board before work starts; it should not block edits, assign tasks, or merge changes.
+`repo-hash` is derived from the git common directory.
 
 ## License
 
