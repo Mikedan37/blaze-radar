@@ -24,8 +24,6 @@ final class V03RegressionTests: XCTestCase {
         super.tearDown()
     }
 
-    // MARK: - Workspace path aliasing (/tmp vs /private/tmp)
-
     func testRegisterWithTmpAliasVisibleViaPrivateTmpQuery() async throws {
         let service = AwarenessService(store: BlazeDBAwarenessStore())
         let viaTmp = "/tmp/radar-alias-\(UUID().uuidString)"
@@ -50,6 +48,29 @@ final class V03RegressionTests: XCTestCase {
         let board = await service.getActiveWork(workspacePath: viaPrivate)
         XCTAssertEqual(board.registrations.count, 1)
         XCTAssertEqual(board.registrations.first?.agentName, "agent-a")
+    }
+
+    func testRadarDBSurvivesPoolEvictionAndReopen() async throws {
+        let service = AwarenessService(store: BlazeDBAwarenessStore())
+        let ws = tempDir.path
+
+        let reg = try await service.register(
+            workspacePath: ws,
+            agentName: "agent-a",
+            task: "observe",
+            branch: "main",
+            worktree: ws
+        )
+
+        let dbPath = (ws as NSString).appendingPathComponent(".blaze/radar/radar.blazedb")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: dbPath))
+
+        await BlazeDBClientPool.shared.evict(workspacePath: ws)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: dbPath), "evict must flush, not delete radar.blazedb")
+
+        let found = try await BlazeDBAwarenessStore().find(workspacePath: ws, id: reg.id)
+        XCTAssertNotNil(found)
+        XCTAssertEqual(found?.agentName, "agent-a")
     }
 
     // MARK: - Default identity is generated, not hostname

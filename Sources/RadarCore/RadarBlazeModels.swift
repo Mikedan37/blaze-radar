@@ -139,6 +139,7 @@ enum RadarDBPaths {
     static let password = "BlazeRadar123!"
 
     static func databaseURL(workspacePath: String) -> URL {
-        URL(fileURLWithPath: workspacePath).appendingPathComponent(".blaze/radar.blazedb")
+        URL(fileURLWithPath: workspacePath)
+            .appendingPathComponent(".blaze/radar/radar.blazedb")
     }
 }

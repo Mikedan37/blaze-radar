@@ -33,7 +33,7 @@ blaze radar done --agent <your-name>
 
 ## Rules
 
-- The **board** is shared (BlazeDB in `.blaze/radar.blazedb`). Your **identity** and **sync cursor** are private (`~/.blaze/radar/`).
+- The **board** is shared (`.blaze/radar/radar.blazedb` in the workspace). Your **identity** and **sync cursor** are private (`~/.blaze/radar/`).
 - `sync` is your checkpoint — git refresh, heartbeat, and **only new findings** since your last sync.
 - Look around before duplicating work. Another agent may already be on it.
 - Record learnings mid-flight, not only at the end.

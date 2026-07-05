@@ -1,452 +1,296 @@
 # Blaze Radar
 
-**A BlazeDB-backed coordination layer for parallel AI coding agents.** (v0.2)
+**A team whiteboard for parallel AI agents.** (v0.3)
 
-When you run multiple Claude/Cursor agents across git worktrees, nobody knows what anyone else is doing. Blaze Radar is the team whiteboard — not a project manager, not a merge bot, not Skynet. Just observability so agents stop duplicating each other's investigations.
+When several agents work the same repo at once, they usually cannot see each other. Agent B rediscovers what Agent A already learned. Blaze Radar fixes that: a **shared board** of who is working on what, plus **findings** other agents can read before they duplicate effort.
 
+Think standup, not hive mind. Agents **pull** updates when they sync — nothing is pushed, nothing is assigned, nothing is merged for you.
+
+**Without Radar:**
 ```
-Engineer walks in  → checks the standup board
-Engineer learns    → updates the board
-Next engineer      → avoids redoing the same discovery
-```
-
-> **This repo ships `RadarCore`** — the awareness module (coordination *logic*). **AgentDaemon** (private) is the canonical *host* — the long-lived process that owns the BlazeDB writer. A minimal demo daemon exists for contributors who lack AgentDaemon.
-
-### Two layers — don't mix them
-
-| Layer | What it is | This repo |
-|-------|------------|-----------|
-| **Coordination logic** | Shared state, concurrency safety, history, "who's doing what?", "what did they learn?" | **`RadarCore`** — the product |
-| **Coordination process** | One long-lived owner of the DB connection, background git polling, heartbeats, stable API | **AgentDaemon** — the host |
-
-The minimum architecture that solves parallel-agent awareness:
-
-```
-Claude / Cursor agents
-        ↓
-   shared interface
-        ↓
-    RadarCore
-        ↓
-     BlazeDB
+10:00  Agent A discovers the scheduler already exists
+11:00  Agent B builds another scheduler
 ```
 
-That can work. BlazeDB already handles the scary part (durable, serialized writes). The reason ProjectBlaze puts AgentDaemon in front:
-
+**With Radar:**
 ```
-Agents → AgentDaemon → RadarCore → BlazeDB
-              ↑
-    single BlazeDB writer
-    background GitObserver
-    stable `blaze radar sync` API
+10:00  Agent A records the finding
+11:00  Agent B syncs
+11:01  Agent B changes approach
 ```
-
-BlazeDB is built around **one writer, serialized mutations, many reads**. AgentDaemon is the serialization boundary — like an app server in front of Postgres. It is not the radar algorithm. It keeps the lights on.
-
-### Production architecture
-
-```
-AgentCLI          blaze radar register | sync | update | done
-    ↓
-AgentDaemon       host process (private) — owns BlazeDB client, runs poller
-    ↓
-RadarCore         awareness module (this repo — public)
-    ↓
-BlazeDB           durable coordination store
-```
-
-See [docs/AGENT_DAEMON_INTEGRATION.md](docs/AGENT_DAEMON_INTEGRATION.md) for wiring RadarCore into AgentDaemon.
-
-### Optional demo stack (not canonical)
-
-```
-blaze-radar-demo  →  blaze-radar-demo-daemon  →  RadarCore  →  BlazeDB
-```
-
-The demo daemon is **not** the product. It exists because outsiders don't have AgentDaemon. Same pattern: one process owns writes, agents talk to a socket. Tiny digital janitor with a socket.
-
-### Ownership model (the core invariant)
-
-**Shared** (workspace / BlazeDB — what is true globally):
-
-- Active board — who is working on what
-- Findings — discoveries, ruled-out hypotheses, learnings
-- Git observations — polled branch/HEAD/changed files
-- Workspace registry — which repos the poller watches
-
-**Private** (per agent — under `~/.blaze/radar/`):
-
-- **Identity** — `session.json` (agent id, name, workspace)
-- **Sync cursor** — `sync.json` (what *this* agent has already seen)
-
-```
-your-repo/.blaze/
-  radar.blazedb                 ← shared truth (BlazeDB)
-
-~/.blaze/radar/workspaces/{hash}/agents/{agentId}/
-  session.json                  ← who am I?
-  sync.json                     ← what have I seen?
-```
-
-Multiple agents on the same monorepo share one board. Each agent keeps its own nametag and read position. Claude A and Claude B no longer stomp each other's session files.
-
-`blaze radar register --agent Claude` **resumes** an existing session for that name. Use `--new` to force a fresh registration.
 
 ---
 
-## What this is not
+## What it does
 
-Blaze Radar does **not** make agents share a brain. It gives them the same situational awareness human engineers get from standups, PRs, and Slack.
+| You want to… | Radar gives you… |
+|--------------|------------------|
+| Say "I'm working on X" | **Registration** on a shared board (branch, task, worktree) |
+| Share a discovery mid-flight | **`update --found`** / **`--ruled-out`** (append-only learnings) |
+| See what changed since you last looked | **`sync`** — only **new** findings from others, plus full board |
+| See everyone active right now | **`active`** |
+| Leave the board | **`done`** |
+| Get a hint before overlapping work | **Warnings** (file overlap + lightweight topic match — hints, not locks) |
 
-People will misunderstand this. Blaze Radar is:
+**Success looks like:** Agent B reads Agent A's finding *before* spending hours on the same investigation.
 
-| It is | It is not |
-|-------|-----------|
-| A team whiteboard | A project manager |
-| Situational awareness | A shared mind / hive consciousness |
-| Pull-based observation | Push notifications or autopilot |
-| "Look around before duplicating work" | Scheduling, assignment, or ownership claims |
-| Awareness only | Scheduling, assignment, or merge automation |
-
-**The actual product metric:** Did Agent B learn what Agent A discovered *before* spending three hours on the same investigation?
-
-The scheduler collision that motivated this wasn't a code-generation failure. Both agents wrote good code. The failure was that they didn't know they were coworkers. That's the bug Blaze Radar patches.
-
-**Adoption reality:** Radar only works if agents actually use it. `blaze radar sync` needs to become muscle memory — every 15 minutes or before changing approach. If agents ignore it, you get that one Confluence page nobody has updated since 2019, but in Markdown.
-
-**Longer term (not v1):** MCP integration could lower the "remember to run a shell command" problem — auto-register on session start, a tool call to check radar, auto-update on discoveries. Not because MCP is magically smarter, but because it removes friction.
+**It does not:** schedule work, claim files, auto-merge, or share one agent identity. Each agent has its own name and sync cursor. Warnings are hints — read the findings; don't expect semantic magic (`auth` vs `session` can still slip through).
 
 ---
 
-## The problem
+## Mental model
 
-Running 4–6 agents in parallel on one monorepo fails in predictable ways:
+```
+Engineer walks in  →  checks the standup board
+Engineer learns    →  writes it on the board
+Next engineer      →  reads the board before redoing the work
+```
 
-| Failure | What happens |
-|---------|--------------|
-| **Duplicate discovery** | Agent B spends 3 hours rediscovering what Agent A already found |
-| **Concept collisions** | Same underlying system, different files — file-level locks don't help |
-| **Tunnel vision** | Agent checks radar at T+0, pivots at T+30, never looks again |
-| **Integration blindness** | Nobody knows what's landing on `main` (out of scope for v1) |
+- **Board** (shared between local agents using the same workspace — lives in `<workspace>/.blaze/radar/`, not in git) — global truth for that workspace
+- **Your nametag** (private, in `~/.blaze/radar/`) — who you are and what you've already read
 
-The human was the only shared memory. That doesn't scale.
+Same monorepo, many agents → one board, many private cursors.
 
 ---
 
-## What Blaze Radar fixes
+## Zero setup mode (v0.3)
 
-**Core invariant:** If Agent A learns something important, Agent B can discover it *before* duplicating the work.
+Most of the time you only need:
 
-Blaze Radar gives you:
+```bash
+blaze radar sync --workspace /path/to/repo
+```
 
-- **Registration** — agents declare what they're solving and which worktree they're in
-- **Living branch summaries** — mid-investigation learnings via `update`, not just at the end
-- **Related-area warnings** — dumb-but-effective token overlap detects conceptual collisions
-- **Git observation** — daemon independently polls registered worktrees (trust, but verify)
-- **Sync checkpoints** — one command refreshes heartbeat, git state, and shows *only new findings* since your last sync
+If you have no identity yet, sync will:
 
-Fix "nobody knows what anyone is doing" first. Let the next pain earn its right to exist. See [What this is not](#what-this-is-not) for scope boundaries.
+1. Create a generated agent name (e.g. `agent-a3f2`)
+2. Register you on the board
+3. Save your private cursor under `~/.blaze/radar/`
+4. Show the ACTIVE board
+
+Use **`register`** when you want to set an explicit task up front or pick a stable `--agent` name. **`sync`** is the default entry point — including via `blaze run` / `blaze edit` hooks in ProjectBlaze.
+
+First sync captures a baseline: full board visible, nothing marked `+` yet. Later syncs show only **new** findings from others.
 
 ---
 
-## What's public vs. private
-
-Blaze Radar was extracted from an internal agent stack. Here's what you can and cannot access today:
-
-| Component | Status | Role |
-|-----------|--------|------|
-| **RadarCore** (this repo) | **Public** | Awareness module — `AwarenessService`, BlazeDB store, git poller |
-| **[BlazeDB](https://github.com/Mikedan37/BlazeDB)** | **Public** | Persistence engine |
-| **AgentDaemon** | **Private** | **Canonical host** — single BlazeDB writer, background poller, stable RPC |
-| **AgentCLI** (`blaze radar`) | **Private** | Canonical CLI — talks to AgentDaemon via BlazeBinary |
-| **ProjectBlaze** | **Private** | Parent monorepo — not on GitHub |
-| **Demo daemon/CLI** | **Public** (this repo) | Optional — try RadarCore without AgentDaemon |
-
-**What this means for you:**
-
-- **Integrators with AgentDaemon:** Add `RadarCore` as a SwiftPM dependency. AgentDaemon remains the process boundary.
-- **Contributors without AgentDaemon:** Use `blaze-radar-demo-daemon` + `blaze-radar-demo` to exercise the module locally.
-- **You cannot** get AgentDaemon or full AgentCLI from GitHub — those stay private due to IP.
-
-> **Why this repo is public**  
-> RadarCore + BlazeDB demonstrate a real multi-agent coordination architecture without exposing the proprietary agent runtime.
-
----
-
-## Architecture
-
-### Mental model
-
-```
-RadarCore  =  the product   (AwarenessService + coordination state)
-BlazeDB    =  the safety layer   (durable, serialized persistence)
-AgentDaemon = the host   (owns the DB connection, runs background work)
-```
-
-AgentDaemon is not required because radar *can't* work without it. ProjectBlaze already routes all agent interactions through one local runtime — radar is another capability on that bus.
-
-```mermaid
-flowchart TB
-    subgraph agents["Parallel agents"]
-        A1["Agent A"]
-        A2["Agent B"]
-        A3["Agent C"]
-    end
-
-    subgraph canonical["Production — single writer"]
-        CLI["AgentCLI\nblaze radar *"]
-        AD["AgentDaemon\nowns BlazeDB client"]
-    end
-
-    subgraph core["Public — this repo"]
-        RC["RadarCore\nAwarenessService"]
-        POLL["AwarenessGitPoller"]
-        DET["RelatedAreaDetector"]
-    end
-
-    subgraph demo["Demo glue only"]
-        DEMOCLI["blaze-radar-demo"]
-        DEMOD["blaze-radar-demo-daemon"]
-    end
-
-    subgraph blazedb["BlazeDB"]
-        DB[".blaze/radar.blazedb"]
-    end
-
-    A1 & A2 & A3 --> CLI
-    CLI --> AD
-    AD --> RC
-    RC --> POLL & DET
-    RC --> DB
-    DEMOCLI -.-> DEMOD
-    DEMOD -.-> RC
-```
-
-**What AgentDaemon adds for coordination** (not intelligence):
-
-1. **One long-lived process** — agents don't each open BlazeDB independently
-2. **Background observation** — git polling, heartbeats, stale cleanup
-3. **Stable API** — agents say `blaze radar sync`; daemon hides schema, paths, locking
-
-### Data flow (one `sync` — production)
-
-```mermaid
-sequenceDiagram
-    participant Agent as AgentCLI
-    participant Daemon as AgentDaemon
-    participant Core as RadarCore
-    participant Store as BlazeDB
-    participant Git as git worktrees
-
-    Agent->>Daemon: sync(workspace, registrationId)
-    Daemon->>Core: sync + poll
-    Core->>Git: poll registered worktrees
-    Git-->>Core: branch, HEAD, changed files
-    Core->>Store: upsert agent + append findings
-    Core-->>Daemon: SyncResult + snapshot
-    Daemon-->>Agent: BlazeBinary response
-    Agent->>Agent: diff vs ~/.blaze/radar/.../sync.json → NEW deltas
-```
-
-| Module | Role |
-|--------|------|
-| **`RadarCore`** | **The product** — `AwarenessService`, BlazeDB store, related-area detection |
-| **`AgentDaemon`** | **The host** — owns BlazeDB writer, runs `AwarenessGitPoller`, exposes RPC |
-| `RadarDemoDaemon` | Demo janitor — same host pattern, not a second product |
-| `RadarDemoCLI` | Demo client for contributors without private stack |
-
-`AwarenessGitPoller` tracks registered workspace roots and polls **only those worktrees** — no hardcoded repo paths.
-
-### Storage: BlazeDB-backed coordination
-
-Blaze Radar uses **[BlazeDB](https://github.com/Mikedan37/BlazeDB)** as the embedded persistence engine — not a shared Markdown file.
-
-```
-AgentCLI → AgentDaemon → RadarCore → BlazeDB
-```
-
-**Why BlazeDB:** Multiple agents writing simultaneously must never corrupt state. BlazeDB provides single-writer coordination, durable append-style findings, and queryable history. A long-running host (AgentDaemon in production, demo daemon for outsiders) sits in front as the write serialization boundary.
-
-**Pluggable storage:** `AwarenessStoreProtocol` defines the API. `BlazeDBAwarenessStore` is the default. `JSONAwarenessStore` remains as an optional adapter for lightweight testing — not the production architecture.
-
-| Collection | Purpose |
-|------------|---------|
-| `RadarAgent` | Registration core fields (task, branch, status, lastSeen) |
-| `RadarFinding` | Append-only discoveries, ruled-out hypotheses, invariants |
-| `RadarGitObservation` | Git poll history per agent |
-| `RadarSyncState` | Sync checkpoint events |
-
-Database path: `<workspace>/.blaze/radar.blazedb`
-
----
-
-## Quick start
+## Quick start (try it locally)
 
 **Requirements:** macOS 15+, Swift 6+, git
-
-### Production (AgentDaemon — private)
-
-AgentCLI + AgentDaemon embed `RadarCore`. See [docs/AGENT_DAEMON_INTEGRATION.md](docs/AGENT_DAEMON_INTEGRATION.md).
-
-```swift
-import RadarCore
-
-let awareness = AwarenessService()  // BlazeDBAwarenessStore by default
-let poller = AwarenessGitPoller(service: awareness)
-poller.start()
-```
-
-### Demo (public — no AgentDaemon)
 
 ```bash
 git clone https://github.com/Mikedan37/blaze-radar.git
 cd blaze-radar
 swift build -c release
+export PATH="$PWD/.build/release:$PATH"
 
-.build/release/blaze-radar-demo-daemon &
-.build/release/blaze-radar-demo radar register "fix prompt scheduler"
-.build/release/blaze-radar-demo radar sync
+# Terminal 1 — start the demo host (keeps the board database open)
+blaze-radar-demo-daemon &
+
+# Terminal 2 — act as an agent (any git repo)
+cd /path/to/any/git/repo
+
+blaze-radar-demo radar sync --task "fix prompt scheduler"   # auto-registers if needed
+blaze-radar-demo radar update --found "Scheduler already uses cron in Sources/Scheduler"
+blaze-radar-demo radar sync
+blaze-radar-demo radar active
 ```
 
-### Agent playbook
+In **ProjectBlaze**, the same commands are `blaze radar …` via AgentCLI + AgentDaemon. Semantics are identical; only the host binary differs.
 
-Copy `templates/CLAUDE.md` into your repo (works with AgentCLI or demo CLI):
+---
 
-```bash
-blaze radar register "fix prompt scheduler" --agent claude-a --workspace /monorepo --worktree /monorepo/wt-a
-blaze radar sync --agent claude-a
-blaze radar update --found "..." --agent claude-a
-blaze radar done --agent claude-a
-```
+## How to use it (agent workflow)
 
-Use a stable `--agent` name per session. Production uses AgentCLI → AgentDaemon; demo uses `blaze-radar-demo`.
+Pick a **stable name** per session (`agent-a`, `cursor-signup-fix`) if you use `--agent`. Otherwise sync will generate one for you.
 
-## Commands
-
-Used via **AgentCLI** (production) or **`blaze-radar-demo`** (local demo):
-
-| Command | Purpose |
-|---------|---------|
-| `blaze radar register "<task>"` | Declare what you're working on (resumes same `--agent`) |
-| `blaze radar sync` | Heartbeat + git refresh + delta findings + full board |
-| `blaze radar active` | Show all active work (no delta) |
-| `blaze radar update --found "..."` | Record mid-flight learnings |
-| `blaze radar update --ruled-out "..."` | Record ruled-out hypotheses |
-| `blaze radar done` | Mark your registration complete |
-
-### Flags
+### 1. Register (optional — for an explicit task or name)
 
 ```bash
-blaze radar register "fix signup flow" \
+blaze radar register "fix signup interruptions" --agent agent-b \
   --workspace /path/to/monorepo \
-  --worktree /path/to/worktree \
-  --branch fix/signup \
-  --agent claude-session-3    # stable identity — resumes on repeat register
-  --new                       # force fresh registration (optional)
+  --worktree /path/to/your/worktree
 ```
 
-All commands accept `--agent` (defaults to hostname). Parallel agents **must** use distinct `--agent` names.
+Skip this if **`sync`** (or a run/edit hook) already auto-registered you. Use register when you want to describe your task before the first sync.
+
+- **`--workspace`** — repo root (where the shared board lives)
+- **`--worktree`** — where you're actually editing (defaults to workspace)
+- **`--branch`** — optional; detected from git if omitted
+- **`--agent`** — your stable name; **re-running register resumes** the same session
+- **`--new`** — force a fresh registration (rare)
+
+If you skip `--agent`, a generated name like `agent-a3f2` is created per workspace.
+
+### 2. Sync often (your checkpoint)
+
+```bash
+blaze radar sync --agent agent-b
+```
+
+Every sync:
+
+1. Refreshes git state for registered worktrees
+2. Updates your heartbeat (so others see you're still active)
+3. Shows **NEW since last sync** — only findings you haven't seen
+4. Prints the full **ACTIVE** board
+
+**When to sync:** every ~15 minutes, before changing approach, before editing a risky area.
+
+Example output shape:
+
+```
+SYNC @ 2026-07-05T04:00:00Z
+✓ synced findings
+✓ git refresh
+✓ heartbeat updated
+
+NEW since last sync:
+  agent-a (fix/scheduler)
+    Found:
+      + Scheduler already uses cron — do not duplicate
 
 ---
 
-## How it works
+ACTIVE
 
-### Persistence
+agent-a
+  Branch: fix/scheduler
+  Goal:
+    fix prompt scheduler
+  Learned:
+    Scheduler already uses cron — do not duplicate
 
-**Shared** — inside the workspace (committed-adjacent; add `.blaze/` to `.gitignore` if needed):
-
-```
-your-repo/
-  .blaze/
-    radar.blazedb              # BlazeDB — board, findings, git obs (global truth)
-    radar/<branch>/summary.md  # human-readable branch notes (derived on update/done)
-```
-
-**Private** — per agent, outside the repo:
-
-```
-~/.blaze/radar/
-  workspaces/
-    {workspaceHash}/
-      by-name.json             # agent name → agent id index
-      agents/
-        {agentId}/
-          session.json         # identity: agentId, name, workspace, lastSeen
-          sync.json            # this agent's delta baseline
+agent-b
+  Branch: fix/signup
+  Goal:
+    fix signup interruptions
 ```
 
-Never put `session.json` or `sync.json` in the repo. That was the v0.1 bug — it taught agents to share one brain.
+On your **first** sync, the full board is shown and nothing is marked `+` — that's your baseline. Later syncs show only new deltas.
 
-### Sync semantics
+### 3. Record learnings as you go
 
-1. **First sync** — captures baseline in *your* `sync.json`. Full ACTIVE board shown; nothing marked as NEW.
-2. **Later syncs** — compares against *your* cursor, shows only `+` prefixed deltas from other agents.
-3. **Heartbeat** — bumps your `lastSeen`. Presence degrades gracefully: `active` → `idle` (30m) → `stale` (6h). Only `done` removes you from the board.
-4. **Status lines** — sync reports partial truth: `✓ synced findings`, `✓ git refresh`, `⚠ heartbeat not updated`, etc.
+```bash
+blaze radar update --found "Found: X is the root cause" --agent agent-b
+blaze radar update --ruled-out "NOT a database lock issue" --agent agent-b
+blaze radar update --hypothesis "Likely race in checkout flow" --agent agent-b
+```
 
-### Related-area detection
+Findings are **append-only**. Other agents see them on their next sync.
 
-Intentionally dumb ladder — no embeddings required:
+### 4. Check the board anytime
 
-1. Same files
-2. Same directories
-3. Token overlap + domain signal words (`signup`, `scheduler`, etc.)
+```bash
+blaze radar active --workspace /path/to/monorepo
+```
 
-Fast, debuggable, good enough for v0.2. Semantic search is a later pain, if earned.
+No delta, no heartbeat — just who's active and what they reported.
 
-### Adoption (the real next boss)
+### 5. Finish cleanly
 
-Radar cannot fix an agent that never looks at the board. The database is not a mind-control device.
+```bash
+blaze radar done --agent agent-b
+```
 
-Muscle memory for now:
-
-- `register` before starting
-- `sync` every 15 minutes or before pivoting
-- `update` when you learn something
-- `done` when finished
-
-Hooks (auto-register on start, sync before edit) are future work — not v0.2.
+Marks you done; you drop off the active board. History is preserved.
 
 ---
 
-## Example: the test that matters
-
-This is the scenario Blaze Radar was built for — not unit tests, but the *"two agents independently approach the same conceptual area"* test:
+## Two agents, one repo (the scenario this exists for)
 
 ```bash
-# Agent A (fix/prompt-scheduler worktree)
-blaze radar register "fix prompt scheduler" --agent agent-a --worktree ./wt-a
-blaze radar update --found "Found: missing attention arbiter, don't build another scheduler" --agent agent-a
+# Agent A — scheduler worktree
+blaze radar register "fix prompt scheduler" --agent agent-a --worktree ./wt-scheduler
+blaze radar update --found "Found: missing attention arbiter — do NOT build another scheduler" --agent agent-a
 
-# Agent B (fix/signup-interruptions worktree)
-blaze radar register "fix signup interruptions" --agent agent-b --worktree ./wt-b
-blaze radar sync --agent agent-b    # sees A's finding on the board
-
-# Agent B avoids building a second scheduler. Humanity survives another Tuesday.
+# Agent B — signup worktree (different files, related problem space)
+blaze radar register "fix signup interruptions" --agent agent-b --worktree ./wt-signup
+blaze radar sync --agent agent-b
+# → sees A's finding on the board before building overlapping scheduler logic
 ```
 
-### Sync delta proof (parallel agents, no session hacks)
+Run `scripts/blaze-radar-sync-e2e.sh` to prove the two-agent delta behavior on the demo stack.
+
+---
+
+## Adoption hooks (ProjectBlaze)
+
+If you use `blaze run` / `blaze edit`, radar can sync **automatically** at session start (register if needed, then sync). Warnings print on stderr when related work exists.
+
+Disable with:
 
 ```bash
+BLAZE_RADAR_HOOKS=0 blaze run "..."
+```
+
+Copy [`templates/CLAUDE.md`](templates/CLAUDE.md) into a repo so agents know the playbook.
+
+---
+
+## For framework integrators
+
+This repo ships **`RadarCore`** — the coordination logic. A **host process** (AgentDaemon, or `blaze-radar-demo-daemon`) holds the database connection and forwards requests.
+
+```swift
+import RadarCore
+
+let service = AwarenessService()
+
+let reg = try await service.register(
+    workspacePath: workspace,
+    agentName: "agent-a",
+    task: "fix prompt scheduler",
+    branch: nil,
+    worktree: workspace
+)
+
+let result = await service.sync(workspacePath: workspace, registrationId: reg.id)
+let board = await service.getActiveWork(workspacePath: workspace, excludeId: nil)
+```
+
+Storage is pluggable via `AwarenessStoreProtocol` (production: `BlazeDBAwarenessStore`).
+
+Host wiring (RPC, poller, single-writer rules): [docs/AGENT_DAEMON_INTEGRATION.md](docs/AGENT_DAEMON_INTEGRATION.md).
+
+---
+
+## Where data lives
+
+| What | Where |
+|------|--------|
+| Shared board | `<workspace>/.blaze/radar/radar.blazedb` |
+| Branch summaries | `<workspace>/.blaze/radar/<branch>/summary.md` (derived) |
+| Your identity | `~/.blaze/radar/workspaces/{hash}/agents/{id}/session.json` |
+| Your sync cursor | `~/.blaze/radar/.../sync.json` |
+
+Add `.blaze/` to `.gitignore`. The shared board is **local runtime state**, not source code — it is not meant to be committed.
+
+Agent identities and sync cursors live **outside the repo** under `~/.blaze/radar/`. Never copy those between agents or machines; each agent owns its own cursor.
+
+---
+
+## Commands reference
+
+| Command | What it does |
+|---------|----------------|
+| `register "<task>"` | Join or resume on the board |
+| `sync` | Heartbeat + git + new deltas + ACTIVE |
+| `active` | ACTIVE board only |
+| `update --found "…"` | Add a discovery |
+| `update --ruled-out "…"` | Record a ruled-out hypothesis |
+| `done` | Mark your registration complete |
+
+Common flags: `--workspace`, `--worktree`, `--branch`, `--agent`, `--new` (register only).
+
+---
+
+## Verify
+
+```bash
+swift test
 scripts/blaze-radar-sync-e2e.sh
 ```
-
-This script proves the product scenario — not "coordination works if I manually teleport identities":
-
-1. Agent A registers and posts a finding (`--agent agent-a`)
-2. Agent B registers and baseline-syncs (`--agent agent-b`) — sees A in ACTIVE, not as `+` delta
-3. Agent A posts a second finding
-4. Agent B syncs — sees **only** the new finding as `+`
-
-```
-PASS: baseline captured
-PASS: finding one in ACTIVE
-PASS: finding one not in NEW delta
-PASS: only finding two is new
-PASS: finding one not repeated
-```
-
-Unit tests (`swift test`) cover persistence, per-agent state isolation, presence status (idle ≠ withdrawn), related-area detection, and **10-agent concurrent register/update/sync**.
 
 ---
 
@@ -454,37 +298,8 @@ Unit tests (`swift test`) cover persistence, per-agent state isolation, presence
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `BLAZE_RADAR_SOCKET` | `/tmp/blaze_radar.sock` | Daemon socket path |
-
----
-
-## Relationship to the private Blaze stack
-
-| | Private Blaze stack | This repo |
-|--|---------------------|-----------|
-| Host (single writer) | **AgentDaemon** | Demo daemon only |
-| CLI | **AgentCLI** `blaze radar` | `blaze-radar-demo` (optional) |
-| Coordination logic | **RadarCore** (dependency) | **RadarCore** (source) |
-| Persistence | BlazeDB via RadarCore | Same |
-| Wire protocol | BlazeBinary | Demo: JSON over Unix socket |
-
-AgentDaemon hosts RadarCore — it does not implement awareness logic. This repo is the **source of truth** for coordination logic. The daemon is the guy keeping the lights on.
-
----
-
-## Contributing
-
-Contributions welcome on awareness, storage adapters, CLI ergonomics, tests, and docs.
-
-```bash
-git clone https://github.com/Mikedan37/blaze-radar.git
-cd blaze-radar
-swift build
-swift test
-scripts/blaze-radar-sync-e2e.sh   # demo stack e2e proof
-```
-
-Focus areas: `RadarCore`, `AwarenessStoreProtocol` adapters, tests, docs. Demo daemon changes are secondary.
+| `BLAZE_RADAR_SOCKET` | `/tmp/blaze_radar.sock` | Demo daemon socket |
+| `BLAZE_RADAR_HOOKS` | `1` | ProjectBlaze: `0` disables run/edit hooks |
 
 ---
 

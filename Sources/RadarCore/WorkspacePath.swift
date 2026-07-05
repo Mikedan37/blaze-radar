@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(Darwin)
+import Darwin
+#endif
 
 /// Canonical workspace root for radar storage and lookups.
 ///
@@ -14,8 +17,18 @@ public enum WorkspacePath {
             normalized = (FileManager.default.currentDirectoryPath as NSString)
                 .appendingPathComponent(normalized)
         }
-        return URL(fileURLWithPath: normalized)
+        normalized = URL(fileURLWithPath: normalized)
             .standardizedFileURL
+            .path
+
+        #if canImport(Darwin)
+        var buf = [CChar](repeating: 0, count: Int(PATH_MAX))
+        if realpath(normalized, &buf) != nil {
+            return String(cString: buf)
+        }
+        #endif
+
+        return URL(fileURLWithPath: normalized)
             .resolvingSymlinksInPath()
             .path
     }
