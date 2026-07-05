@@ -120,14 +120,16 @@ public struct RadarGitObservation: BlazeStorable, Sendable {
     }
 }
 
-/// Sync checkpoint history (BlazeDB `sync_state` collection).
+/// Latest sync checkpoint per agent (BlazeDB `sync_state` collection).
+/// One row per agent — updated in place on each sync, not append-only history.
+/// Row `id` is independent from the agent registration id (same UUID would clobber the agent row).
 public struct RadarSyncState: BlazeStorable, Sendable {
     public var id: UUID
     public var agentId: UUID
     public var workspacePath: String
     public var lastSyncAt: Date
 
-    public init(id: UUID = UUID(), agentId: UUID, workspacePath: String, lastSyncAt: Date = Date()) {
+    public init(id: UUID, agentId: UUID, workspacePath: String, lastSyncAt: Date = Date()) {
         self.id = id
         self.agentId = agentId
         self.workspacePath = workspacePath

@@ -131,7 +131,18 @@ public actor BlazeDBAwarenessStore: AwarenessStoreProtocol {
     public func recordSync(workspacePath: String, agentId: UUID, at: Date) async throws {
         let ws = canonical(workspacePath)
         let db = try await BlazeDBClientPool.shared.client(workspacePath: ws)
-        try await db.insert(RadarSyncState(agentId: agentId, workspacePath: ws, lastSyncAt: at))
+        let existing = try await db.fetchAll(RadarSyncState.self)
+            .filter { matchesWorkspace($0.workspacePath, canonical: ws) && $0.agentId == agentId }
+            .first
+        // Never reuse the agent's registration UUID as the sync row id — BlazeDB is keyed by id
+        // and would overwrite the agent card with sync metadata.
+        let row = RadarSyncState(
+            id: existing?.id ?? UUID(),
+            agentId: agentId,
+            workspacePath: ws,
+            lastSyncAt: at
+        )
+        _ = try await db.upsert(row)
     }
 
     private func appendMissingFindings(

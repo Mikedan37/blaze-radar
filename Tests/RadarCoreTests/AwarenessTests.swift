@@ -1,4 +1,5 @@
 import XCTest
+import BlazeDB
 @testable import RadarCore
 
 final class AwarenessTests: XCTestCase {
@@ -131,5 +132,52 @@ final class AwarenessTests: XCTestCase {
         let loaded = try await serviceB.getActiveWork(workspacePath: ws)
         XCTAssertEqual(loaded.registrations.count, 1)
         XCTAssertTrue(loaded.registrations[0].discoveredFacts.contains("durable-finding"))
+    }
+
+    func testRepeatedSyncDoesNotGrowSyncStateRows() async throws {
+        let service = makeService()
+        let ws = tempDir.path
+        let reg = try await service.register(
+            workspacePath: ws, agentName: "sync-once", task: "t", branch: "main", worktree: ws
+        )
+
+        for _ in 0..<100 {
+            _ = await service.sync(workspacePath: ws, registrationId: reg.id)
+        }
+
+        let db = try await BlazeDBClientPool.shared.client(workspacePath: ws)
+        let syncRows = try await db.fetchAll(RadarSyncState.self)
+            .filter { $0.agentId == reg.id }
+        XCTAssertEqual(syncRows.count, 1)
+
+        let board = await service.getActiveWork(workspacePath: ws)
+        XCTAssertEqual(board.registrations.count, 1)
+        XCTAssertEqual(board.registrations.first?.id, reg.id)
+
+        await BlazeDBClientPool.shared.evict(workspacePath: ws)
+    }
+
+    func testSyncPreservesAgentForNotes() async throws {
+        let service = makeService()
+        let ws = tempDir.path
+        let reg = try await service.register(
+            workspacePath: ws, agentName: "agent-a", task: "audit upload", branch: "main", worktree: ws
+        )
+
+        let synced = await service.sync(workspacePath: ws, registrationId: reg.id)
+        XCTAssertEqual(synced.snapshot.registrations.count, 1)
+
+        _ = try await service.update(
+            workspacePath: ws,
+            registrationId: reg.id,
+            patch: UpdateAgentRequest(
+                workspacePath: ws,
+                registrationId: reg.id.uuidString,
+                discoveredFacts: ["Upload bug found in UploadPageClient"]
+            )
+        )
+
+        let after = await service.getActiveWork(workspacePath: ws)
+        XCTAssertTrue(after.registrations.first?.discoveredFacts.contains("Upload bug found in UploadPageClient") == true)
     }
 }
