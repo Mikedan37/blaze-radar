@@ -296,31 +296,29 @@ struct RadarDoneCommand: AsyncParsableCommand {
 
 enum RadarFormatter {
     static func formatSnapshot(_ snapshot: ActiveWorkSnapshot) -> String {
-        var lines = ["ACTIVE"]
+        var lines = ["BOARD"]
         if snapshot.registrations.isEmpty {
-            lines.append("")
-            lines.append("(no active work)")
+            lines.append("(empty)")
             return lines.joined(separator: "\n")
+        }
+        var gitSeen = Set<String>()
+        for reg in snapshot.registrations { gitSeen.formUnion(reg.changedFiles) }
+        if !gitSeen.isEmpty {
+            lines.append("")
+            lines.append("observed changes in this worktree:")
+            for path in gitSeen.sorted() { lines.append("  \(path)") }
+            lines.append("  (task on each card = declared intent — not file ownership)")
         }
         for reg in snapshot.registrations {
             lines.append("")
-            let statusSuffix = reg.status == .active ? "" : " [\(reg.status.rawValue)]"
-            lines.append("\(reg.agentName)\(statusSuffix)")
-            lines.append("  Branch: \(reg.branch)")
-            lines.append("  Goal:")
-            lines.append("    \(reg.task)")
-            if let hypothesis = reg.hypothesis, !hypothesis.isEmpty {
-                lines.append("  Hypothesis:")
-                lines.append("    \(hypothesis)")
-            }
-            let learned = reg.discoveredFacts + reg.negatedHypotheses.map { "NOT: \($0)" }
-            if !learned.isEmpty {
-                lines.append("  Learned:")
-                learned.forEach { lines.append("    \($0)") }
-            }
-            if !reg.changedFiles.isEmpty {
-                lines.append("  Files:")
-                reg.changedFiles.forEach { lines.append("    \($0)") }
+            lines.append(reg.agentName)
+            lines.append("  task: \(reg.task)")
+            lines.append("  branch: \(reg.branch)")
+            if !reg.worktree.isEmpty { lines.append("  worktree: \(reg.worktree)") }
+            let notes = reg.discoveredFacts + reg.negatedHypotheses.map { "NOT: \($0)" }
+            if !notes.isEmpty {
+                lines.append("  notes:")
+                notes.forEach { lines.append("    - \($0)") }
             }
         }
         for warning in snapshot.relatedAreas {

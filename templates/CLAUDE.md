@@ -16,7 +16,7 @@ That writes a managed block into `CLAUDE.md` at the repo root.
 
 ```markdown
 <!-- BEGIN BLAZE RADAR -->
-Radar contract: v2.3
+Radar contract: v2.5
 ...
 
 # Agent Awareness (Radar)
@@ -40,6 +40,8 @@ blaze radar done
 Marks your card finished. Off active board. Notes stay in the database.
 
 Cursor hooks sync automatically. Disable: BLAZE_RADAR_HOOKS=0
+
+Claude Code hooks (`.claude/settings.json`) use the same hook path. Disable: BLAZE_RADAR_HOOKS=0
 <!-- END BLAZE RADAR -->
 ```
 

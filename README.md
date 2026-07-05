@@ -409,6 +409,84 @@ Notes from `radar note` append to `discoveredFacts`.
 
 ---
 
+## Talking to the demo daemon
+
+`blaze-radar-demo-daemon` exposes a small **JSON RPC** interface over a **Unix socket** (default: `/tmp/blaze_radar.sock`, override with `BLAZE_RADAR_SOCKET`).
+
+The demo CLI is only a wrapper around that protocol:
+
+```
+blaze-radar-demo radar sync
+        ↓
+JSON request
+        ↓
+blaze-radar-demo-daemon
+        ↓
+RadarCore
+```
+
+**Framing:** one request per line, newline-terminated:
+
+```
+<json>\n
+```
+
+**Request envelope:**
+
+```json
+{"method":"<name>","params":{...}}
+```
+
+**Response envelope:**
+
+```json
+{"success":true,"result":{...}}
+```
+
+or on failure:
+
+```json
+{"success":false,"error":"message","result":null}
+```
+
+**Methods** (see `RadarDemoClient/RadarDaemonClient.swift` for full shapes):
+
+| `method` | Purpose |
+|----------|---------|
+| `register` | Create or resume an agent card |
+| `active` | Read the board (`getActiveWork`) |
+| `sync` | Sync board + heartbeat |
+| `update` | Append notes / patch card |
+| `refresh` | Update task, branch, worktree |
+| `done` | Mark card done |
+
+**Example: sync after register**
+
+```json
+{"method":"sync","params":{"workspacePath":"/path/to/repo","registrationId":"F221AAA7-BEFA-4AC2-ACE5-BC2A026AB34E"}}
+```
+
+**Example: append a note**
+
+```json
+{"method":"update","params":{"workspacePath":"/path/to/repo","registrationId":"F221AAA7-BEFA-4AC2-ACE5-BC2A026AB34E","discoveredFacts":["Database path ruled out"]}}
+```
+
+Connect with any Unix socket client, send one line, read one line back. One connection per request.
+
+This protocol is **demo-only**. ProjectBlaze's AgentDaemon uses **BlazeBinary** framed messages over `/tmp/blaze_agent.sock` (different client, not compatible). If you build your own host, pick whatever transport fits: HTTP, gRPC, Unix sockets, or skip RPC and call `AwarenessService` in-process.
+
+**Where to plug the wire:**
+
+| Goal | What to use |
+|------|-------------|
+| Try it interactively | `blaze-radar-demo` CLI |
+| Script against the public daemon | JSON RPC on `/tmp/blaze_radar.sock` |
+| Embed in your app | `AwarenessService()` directly |
+| Build a distributed host | Your own RPC + `AwarenessStoreProtocol` if needed |
+
+---
+
 ## Building a daemon-backed host
 
 If you have **short-lived CLIs** (like `blaze-radar-demo` or `blaze radar`), add a long-lived process that owns writes and expose a thin RPC layer. The demo stack is the smallest example; ProjectBlaze's AgentDaemon is the production one.

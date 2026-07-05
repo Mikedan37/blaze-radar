@@ -44,7 +44,7 @@ F1="Found: missing attention arbiter, don't build another scheduler"
 F2="Found: attention slot already claimed by signup flow"
 
 "$BLAZE" radar register "fix prompt scheduler" --workspace "$WORKSPACE" --worktree "$TEST_DIR/wt-a" --agent agent-a --branch fix/a >/dev/null
-"$BLAZE" radar update --found "$F1" --workspace "$WORKSPACE" --agent agent-a >/dev/null
+"$BLAZE" radar note "$F1" --workspace "$WORKSPACE" --agent agent-a >/dev/null
 
 "$BLAZE" radar register "fix signup interruptions" --workspace "$WORKSPACE" --worktree "$TEST_DIR/wt-b" --agent agent-b --branch fix/b >/dev/null
 BASE=$("$BLAZE" radar sync --workspace "$WORKSPACE" --agent agent-b)
@@ -52,7 +52,7 @@ assert_contains "$BASE" "first sync" "baseline captured"
 assert_contains "$BASE" "$F1" "finding one in ACTIVE"
 assert_not_contains "$BASE" "+ $F1" "finding one not in NEW delta"
 
-"$BLAZE" radar update --found "$F2" --workspace "$WORKSPACE" --agent agent-a >/dev/null
+"$BLAZE" radar note "$F2" --workspace "$WORKSPACE" --agent agent-a >/dev/null
 DELTA=$("$BLAZE" radar sync --workspace "$WORKSPACE" --agent agent-b)
 assert_contains "$DELTA" "+ $F2" "only finding two is new"
 assert_not_contains "$DELTA" "+ $F1" "finding one not repeated"
