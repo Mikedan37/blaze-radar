@@ -7,7 +7,7 @@ actor BlazeDBClientPool {
     private var clients: [String: BlazeDBClient] = [:]
 
     func client(workspacePath: String) throws -> BlazeDBClient {
-        let key = (workspacePath as NSString).standardizingPath
+        let key = WorkspacePath.canonical(workspacePath)
         if let existing = clients[key] { return existing }
         let url = RadarDBPaths.databaseURL(workspacePath: key)
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)

@@ -3,8 +3,8 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-BLAZE="$ROOT/.build/debug/blaze"
-DAEMON="$ROOT/.build/debug/blaze-radar-daemon"
+BLAZE="$ROOT/.build/debug/blaze-radar-demo"
+DAEMON="$ROOT/.build/debug/blaze-radar-demo-daemon"
 SOCK="/tmp/blaze_radar.sock"
 
 PASS=0
@@ -16,17 +16,6 @@ assert_contains() {
 }
 assert_not_contains() {
   echo "$1" | grep -Fq "$2" && fail "$3 (unexpected: $2)" || pass "$3"
-}
-
-register_agent() {
-  local task="$1" worktree="$2" name="$3" branch="$4"
-  local out
-  out=$("$BLAZE" radar register "$task" --workspace "$WORKSPACE" --worktree "$worktree" --agent "$name" --branch "$branch" 2>&1)
-  echo "$out" | awk '/session:/ {print $2}'
-}
-
-set_session() {
-  printf '{"registrationId":"%s","workspacePath":"%s","agentName":"%s"}\n' "$1" "$WORKSPACE" "$2" > "$WORKSPACE/.blaze/radar-session.json"
 }
 
 cleanup() {
@@ -53,24 +42,17 @@ for i in {1..30}; do [[ -S "$SOCK" ]] && break; sleep 0.1; done
 F1="Found: missing attention arbiter, don't build another scheduler"
 F2="Found: attention slot already claimed by signup flow"
 
-A_ID="$(register_agent "fix prompt scheduler" "$TEST_DIR/wt-a" agent-a fix/a)"
-[[ -n "$A_ID" ]] || fail "agent-a registration id missing"
-[[ -f "$WORKSPACE/.blaze/radar.blazedb" ]] || fail "BlazeDB not created"
-set_session "$A_ID" agent-a
-"$BLAZE" radar update --found "$F1" --workspace "$WORKSPACE" >/dev/null
+"$BLAZE" radar register "fix prompt scheduler" --workspace "$WORKSPACE" --worktree "$TEST_DIR/wt-a" --agent agent-a --branch fix/a >/dev/null
+"$BLAZE" radar update --found "$F1" --workspace "$WORKSPACE" --agent agent-a >/dev/null
 
-B_ID="$(register_agent "fix signup interruptions" "$TEST_DIR/wt-b" agent-b fix/b)"
-[[ -n "$B_ID" ]] || fail "agent-b registration id missing"
-set_session "$B_ID" agent-b
-BASE=$("$BLAZE" radar sync --workspace "$WORKSPACE")
+"$BLAZE" radar register "fix signup interruptions" --workspace "$WORKSPACE" --worktree "$TEST_DIR/wt-b" --agent agent-b --branch fix/b >/dev/null
+BASE=$("$BLAZE" radar sync --workspace "$WORKSPACE" --agent agent-b)
 assert_contains "$BASE" "first sync" "baseline captured"
 assert_contains "$BASE" "$F1" "finding one in ACTIVE"
 assert_not_contains "$BASE" "+ $F1" "finding one not in NEW delta"
 
-set_session "$A_ID" agent-a
-"$BLAZE" radar update --found "$F2" --workspace "$WORKSPACE" >/dev/null
-set_session "$B_ID" agent-b
-DELTA=$("$BLAZE" radar sync --workspace "$WORKSPACE")
+"$BLAZE" radar update --found "$F2" --workspace "$WORKSPACE" --agent agent-a >/dev/null
+DELTA=$("$BLAZE" radar sync --workspace "$WORKSPACE" --agent agent-b)
 assert_contains "$DELTA" "+ $F2" "only finding two is new"
 assert_not_contains "$DELTA" "+ $F1" "finding one not repeated"
 

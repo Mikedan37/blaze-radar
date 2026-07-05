@@ -1,8 +1,12 @@
 import Foundation
+import os
 
 public actor AwarenessService {
+    private static let logger = Logger(subsystem: "dev.blazeradar", category: "AwarenessService")
+
     private let store: any AwarenessStoreProtocol
-    private let staleInterval: TimeInterval = 30 * 60
+    private let activeInterval: TimeInterval = 30 * 60
+    private let idleInterval: TimeInterval = 6 * 3600
 
     public init(store: (any AwarenessStoreProtocol)? = nil) {
         self.store = store ?? BlazeDBAwarenessStore()
@@ -15,7 +19,8 @@ public actor AwarenessService {
         branch: String?,
         worktree: String?
     ) async throws -> AgentRegistration {
-        let resolvedWorktree = worktree ?? workspacePath
+        let ws = WorkspacePath.canonical(workspacePath)
+        let resolvedWorktree = WorkspacePath.canonical(worktree ?? ws)
         let resolvedBranch = branch ?? detectBranch(worktree: resolvedWorktree) ?? "unknown"
 
         let registration = AgentRegistration(
@@ -25,41 +30,96 @@ public actor AwarenessService {
             worktree: resolvedWorktree
         )
 
-        try await store.upsert(workspacePath: workspacePath, registration: registration)
-        await WorkspaceRegistry.shared.note(workspacePath)
-        _ = await refreshGit(workspacePath: workspacePath, registrationId: registration.id)
+        try await store.upsert(workspacePath: ws, registration: registration)
+        await WorkspaceRegistry.shared.note(ws)
+        _ = await refreshGit(workspacePath: ws, registrationId: registration.id)
         return registration
     }
 
-    public func sync(workspacePath: String, registrationId: UUID?) async -> ActiveWorkSnapshot {
-        await WorkspaceRegistry.shared.note(workspacePath)
-        await refreshGitForWorkspace(workspacePath)
-        if let registrationId,
-           var reg = try? await store.find(workspacePath: workspacePath, id: registrationId),
-           reg.status == .active {
-            reg.lastSeen = Date()
-            try? await store.upsert(workspacePath: workspacePath, registration: reg)
-            try? await store.recordSync(workspacePath: workspacePath, agentId: registrationId, at: Date())
+    public func sync(workspacePath: String, registrationId: UUID?) async -> SyncResult {
+        let ws = WorkspacePath.canonical(workspacePath)
+        await WorkspaceRegistry.shared.note(ws)
+        var warnings: [String] = []
+        var gitRefreshed = true
+
+        let gitOutcome = await refreshGitForWorkspace(ws)
+        if !gitOutcome.allSucceeded {
+            gitRefreshed = false
+            warnings.append("git refresh failed for \(gitOutcome.failedCount) agent(s)")
         }
-        return await getActiveWork(workspacePath: workspacePath, excludeId: nil)
+
+        var heartbeatUpdated = false
+        if let registrationId {
+            do {
+                if var reg = try await store.find(workspacePath: ws, id: registrationId),
+                   reg.status.isOnBoard {
+                    reg.lastSeen = Date()
+                    reg.status = .active
+                    try await store.upsert(workspacePath: ws, registration: reg)
+                    try await store.recordSync(workspacePath: ws, agentId: registrationId, at: Date())
+                    heartbeatUpdated = true
+                }
+            } catch {
+                Self.logger.warning("sync heartbeat failed: \(error.localizedDescription, privacy: .public)")
+                warnings.append("heartbeat update failed")
+            }
+        }
+
+        let snapshot = await getActiveWork(workspacePath: ws, excludeId: nil)
+        return SyncResult(
+            snapshot: snapshot,
+            heartbeatUpdated: heartbeatUpdated,
+            gitRefreshed: gitRefreshed,
+            warnings: warnings
+        )
     }
 
     public func getActiveWork(workspacePath: String, excludeId: UUID? = nil) async -> ActiveWorkSnapshot {
-        await reapStale(workspacePath: workspacePath)
-        var active = (try? await store.activeRegistrations(workspacePath: workspacePath)) ?? []
+        let ws = WorkspacePath.canonical(workspacePath)
+        await refreshPresenceStatus(workspacePath: ws)
+        var active = (try? await store.activeRegistrations(workspacePath: ws)) ?? []
         if let excludeId {
             active = active.filter { $0.id != excludeId }
         }
-        let all = (try? await store.load(workspacePath: workspacePath)) ?? []
+        let all = (try? await store.load(workspacePath: ws)) ?? []
         let (related, files) = RelatedAreaDetector.analyze(all)
         return ActiveWorkSnapshot(registrations: active, relatedAreas: related, fileOverlaps: files)
     }
 
-    public func update(workspacePath: String, registrationId: UUID, patch: UpdateAgentRequest) async throws -> AgentRegistration {
-        guard var reg = try await store.find(workspacePath: workspacePath, id: registrationId) else {
+    public func refreshRegistration(
+        workspacePath: String,
+        registrationId: UUID,
+        task: String,
+        branch: String?,
+        worktree: String?
+    ) async throws -> AgentRegistration {
+        let ws = WorkspacePath.canonical(workspacePath)
+        guard var reg = try await store.find(workspacePath: ws, id: registrationId) else {
             throw AwarenessError.registrationNotFound
         }
-        guard reg.status == .active else {
+        guard reg.status.isOnBoard else {
+            throw AwarenessError.registrationNotActive
+        }
+
+        let resolvedWorktree = worktree.map { WorkspacePath.canonical($0) } ?? reg.worktree
+        let resolvedBranch = branch ?? detectBranch(worktree: resolvedWorktree) ?? reg.branch
+        reg.task = task
+        reg.branch = resolvedBranch
+        reg.worktree = resolvedWorktree
+        reg.lastSeen = Date()
+        reg.status = .active
+
+        try await store.upsert(workspacePath: ws, registration: reg)
+        _ = await refreshGit(workspacePath: ws, registrationId: registrationId)
+        return reg
+    }
+
+    public func update(workspacePath: String, registrationId: UUID, patch: UpdateAgentRequest) async throws -> AgentRegistration {
+        let ws = WorkspacePath.canonical(workspacePath)
+        guard var reg = try await store.find(workspacePath: ws, id: registrationId) else {
+            throw AwarenessError.registrationNotFound
+        }
+        guard reg.status.isOnBoard else {
             throw AwarenessError.registrationNotActive
         }
 
@@ -72,57 +132,110 @@ public actor AwarenessService {
         reg.testsAdded.append(contentsOf: patch.testsAdded)
         reg.openQuestions.append(contentsOf: patch.openQuestions)
         reg.lastSeen = Date()
+        reg.status = .active
 
-        try await store.upsert(workspacePath: workspacePath, registration: reg)
-        try writeSummary(workspacePath: workspacePath, registration: reg)
+        try await store.upsert(workspacePath: ws, registration: reg)
+        try writeSummary(workspacePath: ws, registration: reg)
         return reg
     }
 
     public func markDone(workspacePath: String, registrationId: UUID) async throws -> AgentRegistration {
-        guard var reg = try await store.find(workspacePath: workspacePath, id: registrationId) else {
+        let ws = WorkspacePath.canonical(workspacePath)
+        guard var reg = try await store.find(workspacePath: ws, id: registrationId) else {
             throw AwarenessError.registrationNotFound
         }
         reg.status = .done
         reg.completedAt = Date()
         reg.lastSeen = Date()
-        try await store.upsert(workspacePath: workspacePath, registration: reg)
-        try writeSummary(workspacePath: workspacePath, registration: reg, final: true)
+        try await store.upsert(workspacePath: ws, registration: reg)
+        try writeSummary(workspacePath: ws, registration: reg, final: true)
         return reg
     }
 
+    @discardableResult
     public func refreshGit(workspacePath: String, registrationId: UUID) async -> AgentRegistration? {
-        guard var reg = try? await store.find(workspacePath: workspacePath, id: registrationId),
-              reg.status == .active else { return nil }
+        let ws = WorkspacePath.canonical(workspacePath)
+        do {
+            guard var reg = try await store.find(workspacePath: ws, id: registrationId),
+                  reg.status.isOnBoard else { return nil }
 
-        if let obs = GitObserver.observe(worktreePath: reg.worktree) {
+            guard let obs = GitObserver.observe(worktreePath: reg.worktree) else {
+                Self.logger.warning("git observe returned nil for \(reg.worktree, privacy: .public)")
+                return reg
+            }
             reg.branch = obs.branch
             reg.headSHA = obs.headSHA
             reg.changedFiles = obs.changedFiles
             reg.lastSeen = Date()
-            try? await store.upsert(workspacePath: workspacePath, registration: reg)
+            try await store.upsert(workspacePath: ws, registration: reg)
+            return reg
+        } catch {
+            Self.logger.warning("refreshGit failed: \(error.localizedDescription, privacy: .public)")
+            return nil
         }
-        return reg
     }
 
-    public func refreshGitForWorkspace(_ workspacePath: String) async {
-        let active = (try? await store.activeRegistrations(workspacePath: workspacePath)) ?? []
+    private struct GitRefreshOutcome {
+        var allSucceeded: Bool
+        var failedCount: Int
+    }
+
+    private func refreshGitForWorkspace(_ workspacePath: String) async -> GitRefreshOutcome {
+        let ws = WorkspacePath.canonical(workspacePath)
+        let active: [AgentRegistration]
+        do {
+            active = try await store.activeRegistrations(workspacePath: ws)
+        } catch {
+            Self.logger.warning("refreshGitForWorkspace load failed: \(error.localizedDescription, privacy: .public)")
+            return GitRefreshOutcome(allSucceeded: false, failedCount: 1)
+        }
+
+        var failed = 0
         for reg in active {
-            _ = await refreshGit(workspacePath: workspacePath, registrationId: reg.id)
-        }
-    }
-
-    private func reapStale(workspacePath: String) async {
-        guard var all = try? await store.load(workspacePath: workspacePath) else { return }
-        let now = Date()
-        var changed = false
-        for idx in all.indices where all[idx].status == .active {
-            if now.timeIntervalSince(all[idx].lastSeen) > staleInterval {
-                all[idx].status = .withdrawn
-                changed = true
+            let before = reg.headSHA
+            let after = await refreshGit(workspacePath: ws, registrationId: reg.id)
+            if after == nil && before == nil && !reg.changedFiles.isEmpty {
+                // no-op
+            } else if after == nil {
+                failed += 1
             }
         }
-        if changed {
-            try? await store.save(workspacePath: workspacePath, registrations: all)
+        return GitRefreshOutcome(allSucceeded: failed == 0, failedCount: failed)
+    }
+
+    public func pollGitForKnownWorkspaces() async {
+        let workspaces = await WorkspaceRegistry.shared.all()
+        for workspacePath in workspaces {
+            _ = await refreshGitForWorkspace(workspacePath)
+        }
+    }
+
+    private func refreshPresenceStatus(workspacePath: String) async {
+        let ws = WorkspacePath.canonical(workspacePath)
+        do {
+            var all = try await store.load(workspacePath: ws)
+            let now = Date()
+            var changed = false
+            for idx in all.indices where all[idx].status.isOnBoard {
+                let elapsed = now.timeIntervalSince(all[idx].lastSeen)
+                let newStatus: AgentRegistrationStatus
+                if elapsed <= activeInterval {
+                    newStatus = .active
+                } else if elapsed <= idleInterval {
+                    newStatus = .idle
+                } else {
+                    newStatus = .stale
+                }
+                if all[idx].status != newStatus {
+                    all[idx].status = newStatus
+                    changed = true
+                }
+            }
+            if changed {
+                try await store.save(workspacePath: ws, registrations: all)
+            }
+        } catch {
+            Self.logger.warning("refreshPresenceStatus failed: \(error.localizedDescription, privacy: .public)")
         }
     }
 
@@ -208,9 +321,6 @@ public final class AwarenessGitPoller: @unchecked Sendable {
     }
 
     private func pollKnownWorkspaces() async {
-        let workspaces = await WorkspaceRegistry.shared.all()
-        for workspacePath in workspaces {
-            await service.refreshGitForWorkspace(workspacePath)
-        }
+        await service.pollGitForKnownWorkspaces()
     }
 }

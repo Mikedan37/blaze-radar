@@ -62,15 +62,15 @@ final class ConcurrencyTests: XCTestCase {
             try await group.waitForAll()
         }
 
-        try await withThrowingTaskGroup(of: ActiveWorkSnapshot.self) { group in
+        try await withThrowingTaskGroup(of: SyncResult.self) { group in
             for reg in registrations {
                 group.addTask {
                     let service = AwarenessService(store: BlazeDBAwarenessStore())
                     return await service.sync(workspacePath: ws, registrationId: reg.id)
                 }
             }
-            for try await snapshot in group {
-                XCTAssertFalse(snapshot.registrations.isEmpty)
+            for try await result in group {
+                XCTAssertFalse(result.snapshot.registrations.isEmpty)
             }
         }
 

@@ -1,6 +1,6 @@
 import Foundation
 import RadarCore
-import RadarClient
+import RadarDemoClient
 
 actor RadarHandler {
     let service = AwarenessService()
@@ -46,8 +46,8 @@ actor RadarHandler {
                 struct Params: Decodable { let workspacePath: String; let registrationId: String? }
                 let p = try decoder.decode(Params.self, from: paramsData)
                 let regId = p.registrationId.flatMap(UUID.init(uuidString:))
-                let snapshot = await service.sync(workspacePath: p.workspacePath, registrationId: regId)
-                return try wireResponse(success: true, result: snapshot, error: nil)
+                let result = await service.sync(workspacePath: p.workspacePath, registrationId: regId)
+                return try wireResponse(success: true, result: result, error: nil)
 
             case "update":
                 let patch = try decoder.decode(UpdateAgentRequest.self, from: paramsData)
@@ -57,6 +57,27 @@ actor RadarHandler {
                 _ = try await service.update(workspacePath: patch.workspacePath, registrationId: id, patch: patch)
                 struct Empty: Encodable {}
                 return try wireResponse(success: true, result: Empty(), error: nil)
+
+            case "refresh":
+                struct Params: Decodable {
+                    let workspacePath: String; let registrationId: String; let task: String
+                    let branch: String?; let worktree: String?
+                }
+                let p = try decoder.decode(Params.self, from: paramsData)
+                guard let id = UUID(uuidString: p.registrationId) else {
+                    return try wireError("Invalid registration ID")
+                }
+                let reg = try await service.refreshRegistration(
+                    workspacePath: p.workspacePath,
+                    registrationId: id,
+                    task: p.task,
+                    branch: p.branch,
+                    worktree: p.worktree
+                )
+                let result = RegisterAgentResponse(
+                    registrationId: reg.id.uuidString, branch: reg.branch, worktree: reg.worktree
+                )
+                return try wireResponse(success: true, result: result, error: nil)
 
             case "done":
                 struct Params: Decodable { let workspacePath: String; let registrationId: String }
@@ -128,7 +149,7 @@ final class RadarServer: @unchecked Sendable {
 
         running = true
         poller.start()
-        fputs("blaze-radar-daemon listening on \(socketPath)\n", stderr)
+        fputs("blaze-radar-demo-daemon listening on \(socketPath)\n", stderr)
 
         while running {
             let clientFD = accept(listenFD, nil, nil)

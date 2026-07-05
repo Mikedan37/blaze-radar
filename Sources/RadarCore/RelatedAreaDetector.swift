@@ -13,7 +13,7 @@ public enum RelatedAreaDetector {
     ]
 
     public static func analyze(_ registrations: [AgentRegistration]) -> (related: [RelatedAreaWarning], files: [FileOverlapWarning]) {
-        let active = registrations.filter { $0.status == .active }
+        let active = registrations.filter { $0.status.isOnBoard }
         var related: [RelatedAreaWarning] = []
         var files: [FileOverlapWarning] = []
 

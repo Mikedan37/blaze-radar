@@ -55,7 +55,7 @@ final class AwarenessTests: XCTestCase {
             patch: UpdateAgentRequest(workspacePath: ws, registrationId: a.id.uuidString, discoveredFacts: ["finding-one"])
         )
         let baseline = await service.sync(workspacePath: ws, registrationId: nil)
-        XCTAssertEqual(baseline.registrations.count, 1)
+        XCTAssertEqual(baseline.snapshot.registrations.count, 1)
 
         _ = try await service.update(
             workspacePath: ws, registrationId: a.id,

@@ -53,7 +53,7 @@ public actor JSONAwarenessStore: AwarenessStoreProtocol {
     }
 
     public func activeRegistrations(workspacePath: String) async throws -> [AgentRegistration] {
-        try await load(workspacePath: workspacePath).filter { $0.status == .active }
+        try await load(workspacePath: workspacePath).filter { $0.status.isOnBoard }
     }
 
     public func recordSync(workspacePath: String, agentId: UUID, at: Date) async throws {

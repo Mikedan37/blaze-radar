@@ -5,10 +5,11 @@ let package = Package(
     name: "BlazeRadar",
     platforms: [.macOS(.v15)],
     products: [
-        .executable(name: "blaze-radar-daemon", targets: ["RadarDaemon"]),
-        .executable(name: "blaze", targets: ["BlazeCLI"]),
+        // Primary deliverable — awareness module for AgentDaemon (or any host process)
         .library(name: "RadarCore", targets: ["RadarCore"]),
-        .library(name: "RadarClient", targets: ["RadarClient"]),
+        // Optional: try radar without the private AgentDaemon stack
+        .executable(name: "blaze-radar-demo-daemon", targets: ["RadarDemoDaemon"]),
+        .executable(name: "blaze-radar-demo", targets: ["RadarDemoCLI"]),
     ],
     dependencies: [
         .package(url: "https://github.com/apple/swift-argument-parser", from: "1.2.0"),
@@ -21,12 +22,13 @@ let package = Package(
                 .product(name: "BlazeDB", package: "BlazeDB"),
             ]
         ),
-        .target(name: "RadarClient", dependencies: ["RadarCore"]),
-        .executableTarget(name: "RadarDaemon", dependencies: ["RadarCore"]),
+        // Demo glue — NOT the canonical architecture (see README)
+        .target(name: "RadarDemoClient", dependencies: ["RadarCore"]),
+        .executableTarget(name: "RadarDemoDaemon", dependencies: ["RadarCore"]),
         .executableTarget(
-            name: "BlazeCLI",
+            name: "RadarDemoCLI",
             dependencies: [
-                "RadarClient",
+                "RadarDemoClient",
                 "RadarCore",
                 .product(name: "ArgumentParser", package: "swift-argument-parser"),
             ],

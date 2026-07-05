@@ -8,7 +8,7 @@ public enum RadarClientError: Error, LocalizedError {
 
     public var errorDescription: String? {
         switch self {
-        case .daemonUnavailable: return "blaze-radar-daemon is not running"
+        case .daemonUnavailable: return "blaze-radar-demo-daemon is not running (start it for local demos only)"
         case .connectionFailed(let e): return "Connection failed: \(e.localizedDescription)"
         case .invalidResponse(let msg): return msg
         }
@@ -60,12 +60,35 @@ public final class RadarDaemonClient: @unchecked Sendable {
         return try perform("active", Params(workspacePath: workspacePath, excludeRegistrationId: excludeRegistrationId))
     }
 
-    public func syncRadar(workspacePath: String, registrationId: String? = nil) async throws -> ActiveWorkSnapshot {
+    public func syncRadar(workspacePath: String, registrationId: String? = nil) async throws -> SyncResult {
         struct Params: Encodable {
             let workspacePath: String
             let registrationId: String?
         }
         return try perform("sync", Params(workspacePath: workspacePath, registrationId: registrationId))
+    }
+
+    public func refreshRegistration(
+        workspacePath: String,
+        registrationId: String,
+        task: String,
+        branch: String? = nil,
+        worktree: String? = nil
+    ) async throws -> RegisterAgentResponse {
+        struct Params: Encodable {
+            let workspacePath: String
+            let registrationId: String
+            let task: String
+            let branch: String?
+            let worktree: String?
+        }
+        return try perform("refresh", Params(
+            workspacePath: workspacePath,
+            registrationId: registrationId,
+            task: task,
+            branch: branch,
+            worktree: worktree
+        ))
     }
 
     public func updateAgent(_ request: UpdateAgentRequest) async throws {

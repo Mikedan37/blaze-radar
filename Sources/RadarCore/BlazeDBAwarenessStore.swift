@@ -5,11 +5,20 @@ import BlazeDB
 public actor BlazeDBAwarenessStore: AwarenessStoreProtocol {
     public init() {}
 
+    private func canonical(_ workspacePath: String) -> String {
+        WorkspacePath.canonical(workspacePath)
+    }
+
+    private func matchesWorkspace(_ rowPath: String, canonical: String) -> Bool {
+        WorkspacePath.canonical(rowPath) == canonical
+    }
+
     public func load(workspacePath: String) async throws -> [AgentRegistration] {
-        let db = try await BlazeDBClientPool.shared.client(workspacePath: workspacePath)
-        let agents = try await db.fetchAll(RadarAgent.self).filter { $0.workspacePath == workspacePath }
-        let findings = try await db.fetchAll(RadarFinding.self).filter { $0.workspacePath == workspacePath }
-        let observations = try await db.fetchAll(RadarGitObservation.self).filter { $0.workspacePath == workspacePath }
+        let ws = canonical(workspacePath)
+        let db = try await BlazeDBClientPool.shared.client(workspacePath: ws)
+        let agents = try await db.fetchAll(RadarAgent.self).filter { matchesWorkspace($0.workspacePath, canonical: ws) }
+        let findings = try await db.fetchAll(RadarFinding.self).filter { matchesWorkspace($0.workspacePath, canonical: ws) }
+        let observations = try await db.fetchAll(RadarGitObservation.self).filter { matchesWorkspace($0.workspacePath, canonical: ws) }
         return agents.map { assemble(agent: $0, findings: findings, observations: observations) }
     }
 
@@ -20,16 +29,17 @@ public actor BlazeDBAwarenessStore: AwarenessStoreProtocol {
     }
 
     public func upsert(workspacePath: String, registration: AgentRegistration) async throws {
-        let db = try await BlazeDBClientPool.shared.client(workspacePath: workspacePath)
-        let agent = RadarAgent(from: registration, workspacePath: workspacePath)
+        let ws = canonical(workspacePath)
+        let db = try await BlazeDBClientPool.shared.client(workspacePath: ws)
+        let agent = RadarAgent(from: registration, workspacePath: ws)
         _ = try await db.upsert(agent)
 
         let existingFindings = try await db.fetchAll(RadarFinding.self)
-            .filter { $0.workspacePath == workspacePath && $0.agentId == registration.id }
+            .filter { matchesWorkspace($0.workspacePath, canonical: ws) && $0.agentId == registration.id }
 
         try await appendMissingFindings(
             db: db,
-            workspacePath: workspacePath,
+            workspacePath: ws,
             agentId: registration.id,
             type: .discovered,
             messages: registration.discoveredFacts,
@@ -37,7 +47,7 @@ public actor BlazeDBAwarenessStore: AwarenessStoreProtocol {
         )
         try await appendMissingFindings(
             db: db,
-            workspacePath: workspacePath,
+            workspacePath: ws,
             agentId: registration.id,
             type: .negated,
             messages: registration.negatedHypotheses,
@@ -45,7 +55,7 @@ public actor BlazeDBAwarenessStore: AwarenessStoreProtocol {
         )
         try await appendMissingFindings(
             db: db,
-            workspacePath: workspacePath,
+            workspacePath: ws,
             agentId: registration.id,
             type: .invariant,
             messages: registration.invariantsChanged,
@@ -53,7 +63,7 @@ public actor BlazeDBAwarenessStore: AwarenessStoreProtocol {
         )
         try await appendMissingFindings(
             db: db,
-            workspacePath: workspacePath,
+            workspacePath: ws,
             agentId: registration.id,
             type: .test,
             messages: registration.testsAdded,
@@ -61,7 +71,7 @@ public actor BlazeDBAwarenessStore: AwarenessStoreProtocol {
         )
         try await appendMissingFindings(
             db: db,
-            workspacePath: workspacePath,
+            workspacePath: ws,
             agentId: registration.id,
             type: .question,
             messages: registration.openQuestions,
@@ -75,7 +85,7 @@ public actor BlazeDBAwarenessStore: AwarenessStoreProtocol {
             if !hasHypothesis {
                 try await db.insert(RadarFinding(
                     agentId: registration.id,
-                    workspacePath: workspacePath,
+                    workspacePath: ws,
                     type: .hypothesis,
                     message: hypothesis
                 ))
@@ -84,7 +94,7 @@ public actor BlazeDBAwarenessStore: AwarenessStoreProtocol {
 
         if let headSHA = registration.headSHA, !headSHA.isEmpty {
             let latest = try await db.fetchAll(RadarGitObservation.self)
-                .filter { $0.workspacePath == workspacePath && $0.agentId == registration.id }
+                .filter { matchesWorkspace($0.workspacePath, canonical: ws) && $0.agentId == registration.id }
                 .sorted { $0.timestamp > $1.timestamp }
                 .first
             let changed = latest?.headSHA != headSHA
@@ -93,7 +103,7 @@ public actor BlazeDBAwarenessStore: AwarenessStoreProtocol {
             if latest == nil || changed {
                 try await db.insert(RadarGitObservation(
                     agentId: registration.id,
-                    workspacePath: workspacePath,
+                    workspacePath: ws,
                     branch: registration.branch,
                     headSHA: headSHA,
                     changedFiles: registration.changedFiles
@@ -103,23 +113,25 @@ public actor BlazeDBAwarenessStore: AwarenessStoreProtocol {
     }
 
     public func find(workspacePath: String, id: UUID) async throws -> AgentRegistration? {
-        let db = try await BlazeDBClientPool.shared.client(workspacePath: workspacePath)
+        let ws = canonical(workspacePath)
+        let db = try await BlazeDBClientPool.shared.client(workspacePath: ws)
         guard let agent = try await db.fetch(RadarAgent.self, id: id),
-              agent.workspacePath == workspacePath else { return nil }
+              matchesWorkspace(agent.workspacePath, canonical: ws) else { return nil }
         let findings = try await db.fetchAll(RadarFinding.self)
-            .filter { $0.workspacePath == workspacePath && $0.agentId == id }
+            .filter { matchesWorkspace($0.workspacePath, canonical: ws) && $0.agentId == id }
         let observations = try await db.fetchAll(RadarGitObservation.self)
-            .filter { $0.workspacePath == workspacePath && $0.agentId == id }
+            .filter { matchesWorkspace($0.workspacePath, canonical: ws) && $0.agentId == id }
         return assemble(agent: agent, findings: findings, observations: observations)
     }
 
     public func activeRegistrations(workspacePath: String) async throws -> [AgentRegistration] {
-        try await load(workspacePath: workspacePath).filter { $0.status == .active }
+        try await load(workspacePath: workspacePath).filter { $0.status.isOnBoard }
     }
 
     public func recordSync(workspacePath: String, agentId: UUID, at: Date) async throws {
-        let db = try await BlazeDBClientPool.shared.client(workspacePath: workspacePath)
-        try await db.insert(RadarSyncState(agentId: agentId, workspacePath: workspacePath, lastSyncAt: at))
+        let ws = canonical(workspacePath)
+        let db = try await BlazeDBClientPool.shared.client(workspacePath: ws)
+        try await db.insert(RadarSyncState(agentId: agentId, workspacePath: ws, lastSyncAt: at))
     }
 
     private func appendMissingFindings(

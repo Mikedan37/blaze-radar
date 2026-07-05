@@ -2,8 +2,17 @@ import Foundation
 
 public enum AgentRegistrationStatus: String, Codable, Sendable {
     case active
+    case idle
+    case stale
     case done
     case withdrawn
+
+    public var isOnBoard: Bool {
+        switch self {
+        case .active, .idle, .stale: return true
+        case .done, .withdrawn: return false
+        }
+    }
 }
 
 public struct AgentRegistration: Codable, Sendable, Equatable {
@@ -144,6 +153,28 @@ public struct UpdateAgentRequest: Codable, Sendable {
         self.invariantsChanged = invariantsChanged
         self.testsAdded = testsAdded
         self.openQuestions = openQuestions
+    }
+}
+
+public struct SyncResult: Codable, Sendable {
+    public let snapshot: ActiveWorkSnapshot
+    public let heartbeatUpdated: Bool
+    public let gitRefreshed: Bool
+    public let warnings: [String]
+
+    public init(snapshot: ActiveWorkSnapshot, heartbeatUpdated: Bool, gitRefreshed: Bool, warnings: [String] = []) {
+        self.snapshot = snapshot
+        self.heartbeatUpdated = heartbeatUpdated
+        self.gitRefreshed = gitRefreshed
+        self.warnings = warnings
+    }
+
+    public func formatStatusLines() -> [String] {
+        var lines: [String] = ["✓ synced findings"]
+        lines.append(gitRefreshed ? "✓ git refresh" : "⚠ git refresh failed")
+        lines.append(heartbeatUpdated ? "✓ heartbeat updated" : "⚠ heartbeat not updated")
+        for warning in warnings { lines.append("⚠ \(warning)") }
+        return lines
     }
 }
 
