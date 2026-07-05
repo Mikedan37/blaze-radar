@@ -21,11 +21,14 @@ struct RadarCommand: AsyncParsableCommand {
         commandName: "radar",
         abstract: "Observe parallel agent work",
         subcommands: [
+            RadarSyncCommand.self,
+            RadarNoteCommand.self,
+            RadarDoneCommand.self,
+            RadarStatusCommand.self,
+            // Legacy demo commands — prefer sync/note above
             RadarRegisterCommand.self,
             RadarActiveCommand.self,
-            RadarSyncCommand.self,
             RadarUpdateCommand.self,
-            RadarDoneCommand.self,
         ]
     )
 }
@@ -33,7 +36,11 @@ struct RadarCommand: AsyncParsableCommand {
 private func shortId(_ id: String) -> String { String(id.prefix(6)) }
 
 struct RadarRegisterCommand: AsyncParsableCommand {
-    static let configuration = CommandConfiguration(commandName: "register", abstract: "Register this agent's work")
+    static let configuration = CommandConfiguration(
+        commandName: "register",
+        abstract: "Register this agent's work",
+        shouldDisplay: false
+    )
 
     @Argument(help: "What you are trying to solve") var task: String
     @Option(name: .long, help: "Agent name (auto-generated per workspace if omitted)") var agent: String?
@@ -85,7 +92,11 @@ struct RadarRegisterCommand: AsyncParsableCommand {
 }
 
 struct RadarActiveCommand: AsyncParsableCommand {
-    static let configuration = CommandConfiguration(commandName: "active", abstract: "Show active agent work")
+    static let configuration = CommandConfiguration(
+        commandName: "active",
+        abstract: "Show active agent work",
+        shouldDisplay: false
+    )
 
     @Option(name: .long, help: "Workspace path") var workspace: String = "."
     @Flag(name: .long, help: "Output JSON") var json: Bool = false
@@ -170,8 +181,60 @@ struct RadarSyncCommand: AsyncParsableCommand {
     }
 }
 
+struct RadarNoteCommand: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(commandName: "note", abstract: "Add a note to the board")
+
+    @Argument(help: "Note text") var text: String
+    @Option(name: .long, help: "Agent name (auto-generated per workspace if omitted)") var agent: String?
+    @Option(name: .long, help: "Workspace path") var workspace: String = "."
+
+    func run() async throws {
+        let workspaceURL = try Workspace.resolve(workspace)
+        let wsPath = workspaceURL.path
+        let agentName = RadarAgentState.resolveAgentName(workspacePath: wsPath, explicit: agent)
+        guard let session = RadarAgentState.findSession(workspacePath: wsPath, agentName: agentName) else {
+            fputs("No radar session — run: blaze-radar-demo radar sync\n", stderr)
+            throw ExitCode.failure
+        }
+        let client = RadarClientFactory.make()
+        defer { client.disconnect() }
+        try await client.updateAgent(UpdateAgentRequest(
+            workspacePath: wsPath,
+            registrationId: session.agentId,
+            discoveredFacts: [text]
+        ))
+        try RadarAgentState.touchSession(workspacePath: wsPath, agentName: agentName)
+        print("Note added")
+    }
+}
+
+struct RadarStatusCommand: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(commandName: "status", abstract: "Peek at the board without heartbeat")
+
+    @Option(name: .long, help: "Workspace path") var workspace: String = "."
+    @Flag(name: .long, help: "Output JSON") var json: Bool = false
+
+    func run() async throws {
+        let workspaceURL = try Workspace.resolve(workspace)
+        let client = RadarClientFactory.make()
+        defer { client.disconnect() }
+        let snapshot = try await client.getActiveWork(workspacePath: workspaceURL.path)
+        if json {
+            let encoder = JSONEncoder()
+            encoder.dateEncodingStrategy = .iso8601
+            print(String(data: try encoder.encode(snapshot), encoding: .utf8) ?? "{}")
+            return
+        }
+        print(RadarFormatter.formatSnapshot(snapshot))
+    }
+}
+
 struct RadarUpdateCommand: AsyncParsableCommand {
-    static let configuration = CommandConfiguration(commandName: "update", abstract: "Record mid-investigation learnings")
+    static let configuration = CommandConfiguration(
+        commandName: "update",
+        abstract: "Record mid-investigation learnings",
+        shouldDisplay: false
+    )
 
     @Option(name: .long, help: "Agent name (auto-generated per workspace if omitted)") var agent: String?
     @Option(name: .long) var hypothesis: String?
@@ -226,7 +289,7 @@ struct RadarDoneCommand: AsyncParsableCommand {
         try await client.markDone(workspacePath: wsPath, registrationId: session.agentId)
         RadarAgentState.clearSession(workspacePath: wsPath, agentName: agentName)
         RadarAgentState.clearSync(workspacePath: wsPath, agentId: session.agentId)
-        print("Radar registration done")
+        print("Marked done — off active board, notes kept")
     }
 }
 

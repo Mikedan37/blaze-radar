@@ -140,7 +140,7 @@ final class V03RegressionTests: XCTestCase {
         let agentA = try await service.register(
             workspacePath: ws,
             agentName: "agent-a",
-            task: "debug scheduler",
+            task: "debug auth scheduler",
             branch: "feat/scheduler",
             worktree: ws
         )
@@ -157,13 +157,13 @@ final class V03RegressionTests: XCTestCase {
         let agentB = try await service.register(
             workspacePath: ws,
             agentName: "agent-b",
-            task: "fix signup",
+            task: "fix auth signup",
             branch: "feat/signup",
             worktree: ws
         )
 
         let syncResult = await service.sync(workspacePath: ws, registrationId: agentB.id)
-        XCTAssertFalse(syncResult.snapshot.relatedAreas.isEmpty, "B should see related-area warning before editing")
+        XCTAssertFalse(syncResult.snapshot.relatedAreas.isEmpty, "shared task word auth should warn")
 
         let agentAOnBoard = syncResult.snapshot.registrations.first { $0.agentName == "agent-a" }
         XCTAssertTrue(

@@ -67,24 +67,25 @@ final class AwarenessTests: XCTestCase {
     }
 
     func testRelatedAreaDetection() {
-        let a = AgentRegistration(agentName: "A", task: "fix signup prompts", branch: "fix/a", worktree: "/tmp/a")
-        let b = AgentRegistration(agentName: "B", task: "fix overlay interruptions", branch: "fix/b", worktree: "/tmp/b")
+        let a = AgentRegistration(agentName: "A", task: "fix auth middleware", branch: "fix/a", worktree: "/tmp/a")
+        let b = AgentRegistration(agentName: "B", task: "auth signup bug", branch: "fix/b", worktree: "/tmp/b")
         let result = RelatedAreaDetector.analyze([a, b])
         XCTAssertFalse(result.related.isEmpty)
+        XCTAssertTrue(result.related[0].reason.contains("auth"))
     }
 
-    func testSameWorktreeInfrastructureOverlapIgnored() {
+    func testSameWorktreeSameFilesWarns() {
         let ws = "/Users/test/RadarTest"
         var a = AgentRegistration(agentName: "agent-4020", task: "working on auth", branch: "main", worktree: ws)
-        var b = AgentRegistration(agentName: "agent-4021", task: "observing", branch: "main", worktree: ws)
+        var b = AgentRegistration(agentName: "agent-4021", task: "billing", branch: "main", worktree: ws)
         a.changedFiles = ["CLAUDE.md", ".blaze/", "README.md"]
         b.changedFiles = ["CLAUDE.md", ".blaze/", "README.md"]
 
         let result = RelatedAreaDetector.analyze([a, b])
-        XCTAssertTrue(result.files.isEmpty, "same worktree should not file-overlap on shared git status")
+        XCTAssertFalse(result.files.isEmpty, "same real files should warn")
         XCTAssertTrue(
-            result.related.isEmpty || !result.related.contains(where: { $0.reason.contains("modifying same files") }),
-            "infrastructure-only overlap should not warn about modifying same files"
+            result.related.contains(where: { $0.reason.contains("Same files") }),
+            "same changed files should surface as related-area warning"
         )
     }
 

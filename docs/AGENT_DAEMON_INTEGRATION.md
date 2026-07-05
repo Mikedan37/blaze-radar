@@ -107,8 +107,13 @@ AgentCLI resolves sessions by `--agent` name. `register` resumes unless `--new`.
 For contributors without AgentDaemon:
 
 ```bash
-swift run blaze-radar-demo-daemon &
-swift run blaze-radar-demo radar register "task"
+swift build -c release
+export PATH="$PWD/.build/release:$PATH"
+blaze-radar-demo-daemon &
+cd /path/to/git-repo
+blaze-radar-demo radar sync --task "auth bug"
+blaze-radar-demo radar note "example finding"
+blaze-radar-demo radar sync   # second terminal — see the note
 ```
 
-Same host pattern (one process owns writes), different wire protocol (JSON over Unix socket). **Not** the product — a janitor so outsiders can try RadarCore.
+Same host pattern (one process owns writes), different wire protocol (JSON over Unix socket). **Not** the product — a way to try RadarCore without ProjectBlaze.

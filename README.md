@@ -1,249 +1,157 @@
 # Blaze Radar
 
-**Add awareness to your existing AI coding agents.**
+**Claude and Cursor sessions don't know each other exist. Radar puts a local board in the repo. Every agent checks the board before work and leaves notes.**
 
-Multiple Claude Code or Cursor agents working in one repo cannot see each other. One window spends an hour on auth while another starts from zero, repeats the same investigation, or edits the same files without knowing anyone is already there.
+A whiteboard. Not a project manager. Not Jira for bots.
 
-Radar gives them a shared local workspace board and installs the instructions and hooks that make them check it automatically.
-
----
-
-## Install once
-
-In your git repo:
-
-```bash
-radar install
-```
-
-Your CLI may prefix the command (`blaze radar install` in ProjectBlaze). Same idea everywhere: one install per repo.
-
-That sets up:
-
-- A managed block in `CLAUDE.md` with rules for when to sync, when to record findings, and what to do before edits
-- Cursor hooks for session start, before edits, and before deploys
-- Local board storage under `.blaze/radar/`
-
-The contract is the point. It does not ask agents to "remember to update the wiki." It tells them: sync at session start, record discoveries as you go, check the board before changing approach.
-
-After install, normal use should not feel like a checklist you maintain by hand.
-
-**What happens automatically:**
-
-- A new agent session starts → syncs and reads the board
-- An agent learns something mid-investigation → records it (because `CLAUDE.md` says to)
-- Before edits or deploys → checks for overlap
-- Another agent opens later → sees existing findings first
+**The bet:** dumb coordination layer → smart workers with context.
 
 ---
 
-## What it looks like
+## Any git repo + a host CLI
 
-**10:00 — Claude window 1**
-
-```
-Working: fix auth
-Found:
-  Token refresh is failing. Database is fine.
-```
-
-**10:20 — Claude window 2 opens**
+Radar works in **any git repository**. The board is created wherever you run it:
 
 ```
-Radar:
-  Another agent is already working on auth.
-Known:
-  Token refresh is failing. Database is fine.
+~/SomeRandomRepo/
+  .blaze/
+    radar/
+      radar.blazedb
 ```
 
-Claude changes direction instead of redoing the investigation.
+You need two things:
 
-Will the second agent stop nuking the first agent's work? That is what Radar is for.
+1. **A git repo** (the workspace — portable, repo-local)
+2. **A Radar host CLI** (the executable — *not* a universal `radar` binary)
+
+```
+any git repo  +  host CLI  =  Radar works
+```
+
+The command prefix depends on the host. There is no standalone `radar` command in this repo.
+
+| Host | Prefix |
+|------|--------|
+| **Demo** (this repo, after `swift build`) | `blaze-radar-demo radar …` |
+| **ProjectBlaze** | `blaze radar …` |
+| **Your integration** | whatever wraps RadarCore |
 
 ---
 
-## Try it with two Claude sessions
-
-This is the proof. Hooks are great, but people trust what they can paste into a window.
-
-**Prerequisites:** `radar install` in the repo, Radar CLI on PATH, daemon running. Use a **new terminal tab** for each window so each session gets its own agent identity.
-
-Open the same repository in two Claude Code windows.
-
-### Claude window 1
-
-Paste:
-
-```text
-You are Agent A.
-
-Start by checking Radar:
-- run radar sync
-- read the active board
-
-Register that you are investigating authentication.
-
-Record anything important you discover with:
-radar update --found "..."
-
-Investigate why authentication is failing.
-```
-
-After it finds something:
-
-```text
-Record your current finding in Radar.
-```
-
-### Claude window 2
-
-Open a **second terminal tab**, start Claude in the same repo, paste:
-
-```text
-You are Agent B.
-
-Before touching code:
-- run radar sync
-- read every active agent and finding
-
-Another agent may already be investigating this.
-
-Your job:
-1. Check what Agent A has learned
-2. Avoid repeating completed investigation
-3. Either continue from their findings or choose a separate area
-
-Do not edit until you understand the current board.
-```
-
-### Expected behavior
-
-**Without Radar:** Agent B starts debugging auth from scratch.
-
-**With Radar:** Agent B sees:
-
-```
-Agent A:
-  Found: Token refresh is failing. Database is fine.
-```
-
-and continues from there.
-
-If window 2 only sees itself, open a new terminal tab (same session = same agent) or run `radar sync --new`.
-
----
-
-## How Radar becomes automatic
-
-Once the manual test works, you should not need those prompts every time.
-
-**Claude Code**
-
-```
-CLAUDE.md (from radar install)
-        ↓
-agent reads Radar rules at session start
-        ↓
-runs sync before editing
-        ↓
-records findings when the contract says to
-```
-
-**Cursor**
-
-```
-.cursor/hooks.json (from radar install)
-        ↓
-session start  →  radar sync
-before edit    →  collision check
-before deploy  →  active work check
-```
-
-Hooks are advisory. They surface context; they do not block your editor. Disable with `BLAZE_RADAR_HOOKS=0` if needed.
-
----
-
-## Manual commands
-
-For debugging or integrators. Day to day, the contract and hooks should handle this.
-
-| When | Command |
-|------|---------|
-| Start of session | `radar sync` |
-| Learned something | `radar update --found "..."` |
-| Ruled something out | `radar update --ruled-out "..."` |
-| Step back | `radar yield` |
-| Finished | `radar done` |
-| Dashboard | `radar status` |
-
----
-
-## Try the board without agents (demo)
-
-**"Does this run?"** Use the demo host from this repo. No Claude required.
+## Try it (demo host, any repo)
 
 ```bash
 git clone https://github.com/Mikedan37/blaze-radar.git
-cd blaze-radar
-swift build -c release
+cd blaze-radar && swift build -c release
 export PATH="$PWD/.build/release:$PATH"
-
 blaze-radar-demo-daemon &
-```
 
-**Terminal 1:**
+cd ~/SomeRandomRepo    # any git repo — not blaze-radar itself
 
-```bash
-cd /path/to/your-repo
-blaze-radar-demo radar sync
-blaze-radar-demo radar update --found "Token refresh is failing. Database is fine."
-```
+blaze-radar-demo radar sync --task "auth bug"
+blaze-radar-demo radar note "Token refresh failing. DB is fine."
 
-**Terminal 2:**
-
-```bash
-cd /path/to/your-repo
+# second terminal, same repo
 blaze-radar-demo radar sync
 ```
-
-Terminal 2 should see Terminal 1's finding.
-
-```bash
-scripts/blaze-radar-sync-e2e.sh
-```
-
-The demo proves the board. `radar install` is what wires it into your agents day to day.
 
 ---
 
-## Build on RadarCore
+## Use it (ProjectBlaze host, any repo)
 
-**"Can I embed this?"** This repo ships the engine.
+```bash
+# once per machine
+cd AgentCLI && make install && blaze daemon start
 
-| Piece | Purpose |
-|-------|---------|
-| **RadarCore** | Presence, findings, sync, collisions |
-| **Demo CLI + daemon** | Local try-it host |
-| **docs/** | Host and storage wiring |
+# once per repo you care about
+cd ~/SomeRandomRepo
+blaze radar install
+
+blaze radar sync --task "fix auth"
+blaze radar note "DB is not the issue"
+blaze radar sync
+blaze radar done
+```
+
+`install` writes `CLAUDE.md` rules, `.cursor/hooks.json`, and `.blaze/radar/` into **that repo**. Without it, agents have to remember to sync — that's "please check the wiki" again.
+
+---
+
+## Commands
+
+Subcommands are the same on every host. Replace `<host>` with your prefix.
+
+| When | Command |
+|------|---------|
+| Start / read board | `<host> radar sync` |
+| Say what you're on | `<host> radar sync --task "auth bug"` |
+| Learned something | `<host> radar note "..."` |
+| Changed focus | `<host> radar sync --task "new task"` |
+| Finished | `<host> radar done` |
+| Peek (no heartbeat) | `<host> radar status` |
+| Wire adapters | `<host> radar install` *(ProjectBlaze and other full hosts)* |
+
+**Demo:** `blaze-radar-demo radar sync`  
+**ProjectBlaze:** `blaze radar sync`
+
+---
+
+## Embed RadarCore
+
+Build your own host, point it at any repo:
 
 ```swift
 import RadarCore
 
 let service = AwarenessService()
 let reg = try await service.register(
-    workspacePath: "/path/to/repo",
+    workspacePath: "/path/to/any/repo",
     agentName: "agent-a",
-    task: "fix auth",
+    task: "auth bug",
     branch: nil,
-    worktree: "/path/to/repo"
+    worktree: "/path/to/any/repo"
 )
-let _ = await service.sync(workspacePath: "/path/to/repo", registrationId: reg.id)
+let _ = await service.sync(workspacePath: "/path/to/any/repo", registrationId: reg.id)
 ```
 
-See [docs/AGENT_DAEMON_INTEGRATION.md](docs/AGENT_DAEMON_INTEGRATION.md). ProjectBlaze is one production host; it is not required.
+Storage is pluggable via `AwarenessStoreProtocol`. BlazeDB is the default.
 
-```bash
-swift test
+See [docs/AGENT_DAEMON_INTEGRATION.md](docs/AGENT_DAEMON_INTEGRATION.md).
+
+---
+
+## Architecture
+
+| Layer | What |
+|-------|------|
+| **1. Primitive** | Shared state in BlazeDB — identity, location, notes |
+| **2. Adoption** | `install`, Claude contract, Cursor hooks — agents actually see it |
+| **3. Later** | Merge/review tooling — not Radar |
+
+Layer 1 is the database. Layer 2 is what makes it useful. Hooks print the board — they do not block, assign, or decide.
+
+---
+
+## The board
+
+```json
+{
+  "id": "agent-a12",
+  "lastSeen": "10 minutes ago",
+  "where": { "branch": "fix-auth", "worktree": "~/repo" },
+  "workingOn": "auth bug",
+  "notes": ["DB is not the issue"]
+}
+```
+
+---
+
+## Why BlazeDB?
+
+The board is **live coordination state**, not a config file. Multiple agents sync and post notes concurrently. BlazeDB provides safe concurrent access, appendable note history, and fast local storage — no cloud.
+
+```
+<any-repo>/.blaze/radar/radar.blazedb
 ```
 
 ---
@@ -252,10 +160,10 @@ swift test
 
 | What | Where |
 |------|--------|
-| Shared board | `<repo>/.blaze/radar/` |
-| Per-agent identity | `~/.blaze/radar/` |
+| Board (shared, per repo) | `<repo>/.blaze/radar/radar.blazedb` |
+| Your session (private) | `~/.blaze/radar/` |
 
-Add `.blaze/` to `.gitignore`.
+One board per git repo. One agent identity per terminal tab. `done` removes your card from the **active** board; notes stay in the database.
 
 ---
 
