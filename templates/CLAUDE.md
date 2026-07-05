@@ -4,13 +4,31 @@ Copy this into your repo as `CLAUDE.md` (or equivalent agent playbook).
 
 Pick a stable agent name for your session (e.g. `claude-a`, `cursor-fix-signup`). Use it on every command.
 
-## Before starting
+## Before starting (verify the binary)
+
+Documentation ≠ running capability. In ProjectBlaze:
+
+```bash
+source AgentCLI/env.sh
+./AgentCLI/scripts/radar-cli-smoke.sh   # must PASS
+blaze radar --help                      # must list sync/active — NOT "Needs generation"
+```
+
+If smoke fails, rebuild: `cd AgentCLI && swift build -c release`. Do not use Homebrew `blaze` 0.1.x for Radar.
+
+## Session start (required)
+
+```bash
+blaze radar sync --agent <your-name>
+```
+
+`sync` auto-registers on first use, refreshes git, prints the ACTIVE board, and shows new findings since your last sync.
+
+Optional explicit register:
 
 ```bash
 blaze radar register "<what you're solving>" --agent <your-name>
 ```
-
-Re-running register with the same `--agent` resumes your session. Use `--new` only if you intentionally want a fresh registration.
 
 ## Every 15 minutes or before changing approach
 

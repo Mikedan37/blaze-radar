@@ -98,6 +98,18 @@ blaze-radar-demo radar active
 
 In **ProjectBlaze**, the same commands are `blaze radar …` via AgentCLI + AgentDaemon. Semantics are identical; only the host binary differs.
 
+**ProjectBlaze build (required — source ≠ running binary):**
+
+```bash
+cd ProjectBlaze/AgentCLI
+swift build -c release
+source env.sh
+./scripts/radar-cli-smoke.sh    # must PASS — catches stale or unwired binaries
+blaze radar --help              # must list sync/active, NOT "Needs generation"
+```
+
+Do not use Homebrew `blaze` (0.1.x) for Radar. Copy [`templates/CLAUDE.md`](templates/CLAUDE.md) into a repo for agent playbooks.
+
 ---
 
 ## How to use it (agent workflow)
@@ -290,6 +302,12 @@ Common flags: `--workspace`, `--worktree`, `--branch`, `--agent`, `--new` (regis
 ```bash
 swift test
 scripts/blaze-radar-sync-e2e.sh
+```
+
+**ProjectBlaze (AgentCLI):** after `swift build -c release` in `AgentCLI/`:
+
+```bash
+./scripts/radar-cli-smoke.sh
 ```
 
 ---
