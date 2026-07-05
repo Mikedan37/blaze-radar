@@ -25,12 +25,16 @@ In any git repository:
 ```bash
 cd ~/SomeRandomRepo
 
+# Terminal 1
 blaze-radar-demo radar sync --task "auth bug"
 blaze-radar-demo radar note "DB is not the issue"
 
-# second terminal, same repo
-blaze-radar-demo radar sync
+# Terminal 2 — same folder, same branch, different session → different card
+blaze-radar-demo radar sync --task "frontend cleanup"
+blaze-radar-demo radar sync   # sees both cards on one board
 ```
+
+Each terminal tab gets its own agent identity automatically. To force a new card in the same tab: `blaze-radar-demo radar sync --new`.
 
 Run tests:
 
@@ -46,23 +50,30 @@ The demo host exposes `blaze-radar-demo radar …`. Other hosts use their own pr
 |---------|---------|
 | `radar sync` | Read the board and refresh your heartbeat |
 | `radar sync --task "…"` | Set or update what you are working on |
+| `radar sync --new` | Force a new agent card for this terminal tab |
 | `radar note "…"` | Append a note to your card |
 | `radar done` | Remove your card from the active board |
 | `radar status` | Read the board without updating heartbeat |
 
+Use `radar sync --json` for machine-readable output (`registrations`, `relatedAreas`, `fileOverlaps`).
+
 `install` (Claude contract, Cursor hooks) is implemented by the host, not by the demo. See [ProjectBlaze](#projectblaze) for one production example.
 
-A card on the board looks like this:
+A registration on the board (`radar sync --json`) looks like this:
 
 ```json
 {
-  "id": "agent-a12",
-  "lastSeen": "10 minutes ago",
-  "where": { "branch": "fix-auth", "worktree": "~/MyApp" },
-  "workingOn": "auth bug",
-  "notes": ["DB is not the issue"]
+  "agentName": "agent-a12",
+  "task": "auth bug",
+  "branch": "fix-auth",
+  "worktree": "/Users/you/MyApp",
+  "status": "active",
+  "discoveredFacts": ["DB is not the issue"],
+  "lastSeen": "2026-07-05T20:04:30Z"
 }
 ```
+
+Notes from `radar note` append to `discoveredFacts`. Other fields (`negatedHypotheses`, `changedFiles`, etc.) are available for richer host integrations.
 
 ## Repository contents
 
@@ -81,8 +92,10 @@ There is no universal `radar` binary. Your host chooses the command prefix and h
 RadarCore is the engine. A typical host adds:
 
 - a CLI or RPC surface
-- a daemon that owns the BlazeDB writer
+- a **daemon with a single BlazeDB writer** (agents queue writes; avoids concurrent write races)
 - optional hooks or contracts so agents sync before work
+
+The demo uses `blaze-radar-demo-daemon` the same way. For a minimal in-process integration:
 
 ```swift
 import RadarCore
@@ -97,6 +110,8 @@ let reg = try await service.register(
 )
 let _ = await service.sync(workspacePath: "/path/to/repo", registrationId: reg.id)
 ```
+
+Hosts must resolve `workspacePath` from any checkout (including worktrees) to the same repository board key. See `RepositoryIdentity.boardKey(from:)` in RadarCore.
 
 Storage is pluggable via `AwarenessStoreProtocol`. BlazeDB is the default.
 
@@ -139,7 +154,8 @@ The board is live coordination state, not a static config file. Multiple agents 
 | Layer | Role |
 |-------|------|
 | **RadarCore** | Board state, sync semantics, note history |
-| **Host** | CLI, daemon, hooks — makes agents actually read the board |
+| **Host daemon** | Single writer to BlazeDB; serializes concurrent agent updates |
+| **Host CLI / hooks** | Makes agents actually read the board before work |
 | **BlazeDB** | On-disk storage |
 
 | What | Where |
@@ -148,6 +164,8 @@ The board is live coordination state, not a static config file. Multiple agents 
 | Session state (per agent tab) | `~/.blaze/radar/workspaces/<repo-hash>/sessions/` + `agents/` |
 
 `repo-hash` is derived from the git common directory. Legacy boards at `<repo>/.blaze/radar/radar.blazedb` are migrated on first access.
+
+Multiple agents can call sync concurrently; the daemon commits writes in order so every agent sees a consistent board state.
 
 Design philosophy: keep the coordination layer simple and let agents stay smart. A host should surface the board before work starts; it should not block edits, assign tasks, or merge changes.
 
