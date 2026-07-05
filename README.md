@@ -145,6 +145,38 @@ Same repository → same board. Different agent session → different card. Work
 
 Radar is not a substitute for git. Git records code changes. Radar records what agents were investigating before those changes exist.
 
+## Nested git repositories
+
+Worktrees share one board because they share one git identity. **Nested repos do not.**
+
+```
+MegaProject/
+  .git/                 ← parent repo board
+  Frontend/
+    .git/               ← separate board
+  Backend/
+    .git/               ← separate board
+```
+
+An agent in `MegaProject/Frontend` coordinates on the **Frontend** board. An agent in `MegaProject/Backend` coordinates on the **Backend** board. They cannot see each other, and that is intentional for v1.
+
+**Coordination boundary = git identity.** Radar does not infer that nested folders are "related." That would require workspace groups, parent-child boards, and cross-repo discovery — out of scope.
+
+| Goal | Where to run agents |
+|------|---------------------|
+| One board for the whole tree | Run from the **parent repo root** (`MegaProject/`). Cards can still record different worktree paths and tasks. |
+| Isolated coordination per sub-repo | Run from each **child repo** (`Frontend/`, `Backend/`). Each gets its own board. |
+
+Example — monorepo-level board with agents working in different areas:
+
+```
+MegaProject board
+  agent-a   worktree: MegaProject/   task: frontend auth
+  agent-b   worktree: MegaProject/   task: backend API
+```
+
+A host may eventually warn when a nested `.git` is detected and a parent repo exists. That is a hint, not automatic merging. For now, **you choose which repository identity agents coordinate in** by where you start them.
+
 ## Why BlazeDB
 
 The board is live coordination state, not a static config file. Multiple agents sync and append notes concurrently. BlazeDB provides local concurrent access and appendable history without a cloud service.
