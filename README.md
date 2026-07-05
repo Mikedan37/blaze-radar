@@ -109,6 +109,18 @@ Storage is pluggable via `AwarenessStoreProtocol`. BlazeDB is the default.
 
 See [docs/AGENT_DAEMON_INTEGRATION.md](docs/AGENT_DAEMON_INTEGRATION.md).
 
+## Why not a Kanban board?
+
+Kanban tracks planned work. Radar tracks live agent context.
+
+A ticket might say: *Fix authentication.*
+
+Radar answers: *Another session is already debugging auth on `fix-token`. It checked the database path and ruled it out ten minutes ago.*
+
+Jira, Slack, and Kanban assume a human decides to check them, understands social context, and updates them intentionally. Agents start stateless, read local context, execute, and move on. Radar is a machine-readable coordination primitive for those sessions — workspace awareness before they act.
+
+Radar does not manage agents. It gives them the environmental context humans naturally have in a shared office.
+
 ## Why not a JSON file?
 
 Radar is shared runtime state. Multiple agents may sync and write notes at the same time.
