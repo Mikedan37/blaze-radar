@@ -33,8 +33,8 @@ You do not need *our* daemon. You need **one owner for shared mutable state**. I
                            ▼
               ┌────────────────────────────┐
               │  Host process (your choice)  │  ← owns the single BlazeDB writer
-              │  • AgentDaemon (production)  │
-              │  • blaze-radar-demo-daemon   │
+              │  • blaze-radar-demo-daemon   │  ← public demo (this repo)
+              │  • AgentDaemon (private)     │
               │  • your own long-lived app   │
               └─────────────┬──────────────┘
                             │  calls into
@@ -62,17 +62,38 @@ That answers: *who is working on what, what did they learn, what changed?*
 
 ## What is in this repo?
 
-| Piece | What it is | Do you need it? |
-|-------|------------|-----------------|
-| **RadarCore** | Swift library: register agents, sync board, append notes, detect overlaps | **Yes**, this is the product |
-| **blaze-radar-demo-daemon** | Tiny local host that owns BlazeDB writes for the demo CLI | Optional: try Radar without ProjectBlaze |
-| **blaze-radar-demo** | Demo CLI (`blaze-radar-demo radar …`) | Optional: same commands, different prefix |
-| **AgentDaemon** | Production host in [ProjectBlaze](https://github.com/Mikedan37/AgentCLI) | Optional: reference integration, not required to use RadarCore |
+### What is public?
+
+This repository contains everything needed to run Radar:
+
+- **RadarCore** (library)
+- **blaze-radar-demo** (example CLI)
+- **blaze-radar-demo-daemon** (example host process)
+
+**ProjectBlaze**, **AgentCLI**, and **AgentDaemon** are not part of this repository. They are the private production host Radar was extracted from.
+
+The demo CLI exists so you can try the full flow without ProjectBlaze:
+
+```bash
+blaze-radar-demo-daemon &
+blaze-radar-demo radar sync --task "auth bug"
+blaze-radar-demo radar note "Database path ruled out"
+```
+
+ProjectBlaze's private `blaze radar ...` commands call the same RadarCore APIs through AgentDaemon. Different binary, same board engine.
+
+| Piece | Public? | Purpose |
+|-------|---------|---------|
+| **RadarCore** | Yes | Library/product |
+| **blaze-radar-demo** | Yes | Try it locally (example CLI) |
+| **blaze-radar-demo-daemon** | Yes | Minimal write-owning process for the demo |
+| **AgentDaemon** | No | Private production host (not in this repo) |
+| **AgentCLI / `blaze`** | No | Private production CLI (not in this repo) |
 
 There is no contradiction between “you need a daemon” and “you don’t need AgentDaemon”:
 
 - You need **one write-owning process** per machine when multiple agent sessions hit the board at once.
-- You do **not** need **this** daemon implementation, **AgentDaemon**, or ProjectBlaze. Any host that serializes writes into RadarCore is fine.
+- You do **not** need ProjectBlaze or AgentDaemon. Use **blaze-radar-demo-daemon** to try the flow here, embed RadarCore in your own app, or build your own host.
 
 ---
 
@@ -129,7 +150,7 @@ ProjectBlaze uses **AgentDaemon** because it already is that local runtime for f
 
 ### What the demo stack is for
 
-`blaze-radar-demo-daemon` is a **minimal host** so contributors can run the board without the private ProjectBlaze tree. Same architecture (one writer), simpler wire protocol (JSON over Unix socket). **Not the product.** Proof that RadarCore is host-agnostic.
+`blaze-radar-demo` + `blaze-radar-demo-daemon` are the **public, self-contained** way to run the full CLI → host → RadarCore → BlazeDB flow. Same architecture as production (one writer), simpler wire protocol (JSON over Unix socket). You do not need ProjectBlaze to use them.
 
 ---
 
@@ -311,7 +332,7 @@ The demo host exposes `blaze-radar-demo radar …`. Other hosts use their own pr
 
 Use `radar sync --json` for machine-readable output.
 
-`install` (Claude contract, Cursor hooks) is implemented by the **host**, not by RadarCore. See [ProjectBlaze](#projectblaze-production-reference) for one production example.
+`install` (Claude contract, Cursor hooks) is a **ProjectBlaze host feature**, not part of this repo. See [ProjectBlaze](#projectblaze-private-production-reference) for context.
 
 Example registration (`radar sync --json`):
 
@@ -379,19 +400,21 @@ Radar does not manage agents. It gives them the environmental context humans nat
 
 ---
 
-## ProjectBlaze (production reference)
+## ProjectBlaze (private production reference)
 
-[ProjectBlaze](https://github.com/Mikedan37/AgentCLI) is the private monorepo Radar was extracted from. **You do not need it to use or contribute to RadarCore.**
+[ProjectBlaze](https://github.com/Mikedan37/AgentCLI) is a **private** monorepo. It is not part of this repository and is not required to use Radar.
 
-It shows one way to make coordination automatic:
+It shows how one production host wires Radar into Claude Code and Cursor:
 
 ```bash
-blaze radar install      # Claude/Cursor contract (host feature)
+blaze radar install      # Claude/Cursor contract (host feature, not in this repo)
 blaze radar sync --task "auth bug"
 blaze radar note "..."
 ```
 
-ProjectBlaze routes `blaze radar *` through **AgentDaemon** (single BlazeDB writer) into the same RadarCore APIs this repo defines. Copy the pattern if it fits; the binary is not part of this public repo.
+ProjectBlaze routes `blaze radar *` through **AgentDaemon** (single BlazeDB writer) into the same RadarCore APIs this repo defines.
+
+**The production `blaze` binary is not available here.** Use `blaze-radar-demo` + `blaze-radar-demo-daemon`, or integrate RadarCore directly.
 
 ---
 
