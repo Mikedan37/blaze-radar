@@ -82,13 +82,13 @@ blaze-radar-demo radar note "Database path ruled out"
 
 ProjectBlaze's private `blaze radar ...` commands call the same RadarCore APIs through AgentDaemon. Different binary, same board engine.
 
-| Piece | Public? | Purpose |
-|-------|---------|---------|
-| **RadarCore** | Yes | Library/product |
-| **blaze-radar-demo** | Yes | Try it locally (example CLI) |
-| **blaze-radar-demo-daemon** | Yes | Minimal write-owning process for the demo |
-| **AgentDaemon** | No | Private production host (not in this repo) |
-| **AgentCLI / `blaze`** | No | Private production CLI (not in this repo) |
+| Piece | Public? | What it is | How it fits |
+|-------|---------|------------|-------------|
+| **RadarCore** | Yes | Swift library: register agents, sync board, append notes, detect overlaps | The product. All hosts call into this. |
+| **blaze-radar-demo** | Yes | Example CLI (`blaze-radar-demo radar …`) | Public substitute for private `blaze radar …`. Same subcommands, different binary prefix. |
+| **blaze-radar-demo-daemon** | Yes | Minimal local host that owns BlazeDB writes for the demo CLI | Public substitute for AgentDaemon. Start this before running the demo CLI. |
+| **AgentDaemon** | No | Long-lived process in [ProjectBlaze](https://github.com/Mikedan37/AgentCLI) that owns the BlazeDB writer, runs git polling, exposes Radar over the agent socket | Production host Radar was extracted from. Same role as `blaze-radar-demo-daemon`, different wire protocol (BlazeBinary) and broader agent runtime. |
+| **AgentCLI / `blaze`** | No | Private CLI in ProjectBlaze (`blaze radar sync`, `blaze radar note`, `blaze radar install`, …) | Production CLI that talks to AgentDaemon. Calls the same RadarCore APIs as `blaze-radar-demo`; adds install hooks, doctor, and Claude/Cursor contract generation. |
 
 There is no contradiction between “you need a daemon” and “you don’t need AgentDaemon”:
 
