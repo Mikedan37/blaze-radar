@@ -110,6 +110,55 @@ final class RepositoryIdentityTests: XCTestCase {
         XCTAssertEqual(RepositoryIdentity.boardKey(from: ws), WorkspacePath.canonical(ws))
     }
 
+    func testTrialWorktreesGetIsolatedBoardKeys() async throws {
+        let repoRoot = tempDir.appendingPathComponent("repo-trial")
+        let trialsRoot = tempHome.appendingPathComponent("radar-trials")
+        let trialA = trialsRoot.appendingPathComponent("trial-002-radar/feature")
+        let trialB = trialsRoot.appendingPathComponent("trial-002-no-radar/feature")
+
+        try FileManager.default.createDirectory(at: repoRoot, withIntermediateDirectories: true)
+        try runGit(["init"], in: repoRoot)
+        try runGit(["config", "user.email", "radar@test.local"], in: repoRoot)
+        try runGit(["config", "user.name", "Radar Test"], in: repoRoot)
+        try "hello".write(to: repoRoot.appendingPathComponent("README.md"), atomically: true, encoding: .utf8)
+        try runGit(["add", "README.md"], in: repoRoot)
+        try runGit(["commit", "-m", "init"], in: repoRoot)
+        try runGit(["branch", "-m", "main"], in: repoRoot)
+        try runGit(["worktree", "add", trialA.path, "-b", "trial/r002-feature"], in: repoRoot)
+        try runGit(["worktree", "add", trialB.path, "-b", "trial/nr002-feature"], in: repoRoot)
+
+        let sharedKey = RepositoryIdentity.boardKey(from: repoRoot.path)
+        let keyA = RepositoryIdentity.boardKey(from: trialA.path)
+        let keyB = RepositoryIdentity.boardKey(from: trialB.path)
+
+        XCTAssertEqual(keyA, "\(sharedKey)#trial=trial-002-radar")
+        XCTAssertEqual(keyB, "\(sharedKey)#trial=trial-002-no-radar")
+        XCTAssertNotEqual(keyA, keyB)
+
+        let service = AwarenessService(store: BlazeDBAwarenessStore())
+        _ = try await service.register(
+            workspacePath: trialA.path,
+            agentName: "agent-a",
+            task: "feature work",
+            branch: "trial/r002-feature",
+            worktree: trialA.path
+        )
+
+        let boardA = await service.getActiveWork(workspacePath: trialA.path)
+        let boardB = await service.getActiveWork(workspacePath: trialB.path)
+        XCTAssertEqual(boardA.registrations.count, 1)
+        XCTAssertEqual(boardB.registrations.count, 0)
+    }
+
+    func testTrialScopeFromEnvironmentOverridesPath() {
+        let ws = tempDir.appendingPathComponent("any-checkout").path
+        try? FileManager.default.createDirectory(atPath: ws, withIntermediateDirectories: true)
+        setenv("BLAZE_RADAR_TRIAL_ID", "trial-custom", 1)
+        defer { unsetenv("BLAZE_RADAR_TRIAL_ID") }
+        let key = RepositoryIdentity.boardKey(from: ws)
+        XCTAssertTrue(key.hasSuffix("#trial=trial-custom"))
+    }
+
     private func runGit(_ args: [String], in directory: URL) throws {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/git")

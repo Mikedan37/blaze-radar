@@ -45,11 +45,13 @@ public enum RelatedAreaDetector {
     }
 
     private static func relatedReason(_ a: AgentRegistration, _ b: AgentRegistration) -> String? {
-        let wordsA = taskWords(a.task)
-        let wordsB = taskWords(b.task)
-        let sharedWords = wordsA.intersection(wordsB)
-        if !sharedWords.isEmpty {
-            return "Same task words: \(sharedWords.sorted().joined(separator: ", "))"
+        if isDeclaredTask(a.task) && isDeclaredTask(b.task) {
+            let wordsA = taskWords(a.task)
+            let wordsB = taskWords(b.task)
+            let sharedWords = wordsA.intersection(wordsB)
+            if !sharedWords.isEmpty {
+                return "Same task words: \(sharedWords.sorted().joined(separator: ", "))"
+            }
         }
 
         let filesA = RadarCoordinationPaths.coordinationRelevant(a.changedFiles)
@@ -69,6 +71,11 @@ public enum RelatedAreaDetector {
 
     private static func taskWords(_ task: String) -> Set<String> {
         tokenize(task)
+    }
+
+    private static func isDeclaredTask(_ task: String) -> Bool {
+        let trimmed = task.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return !trimmed.isEmpty && trimmed != "checking in"
     }
 
     public static func tokenize(_ text: String) -> Set<String> {

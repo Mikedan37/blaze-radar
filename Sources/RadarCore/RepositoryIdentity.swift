@@ -10,11 +10,31 @@ import Foundation
 ///
 /// Same repository → same board. Different agent session → different card. Worktree and branch are metadata.
 public enum RepositoryIdentity {
-    public static func boardKey(from checkoutPath: String) -> String {
-        if let common = gitCommonDirectory(from: checkoutPath) {
-            return WorkspacePath.canonical(common)
+    /// Harness trial isolation: `~/radar-trials/<trial-id>/...` or `BLAZE_RADAR_TRIAL_ID`.
+    public static func trialScope(from checkoutPath: String) -> String? {
+        if let env = ProcessInfo.processInfo.environment["BLAZE_RADAR_TRIAL_ID"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines), !env.isEmpty {
+            return env
         }
-        return WorkspacePath.canonical(checkoutPath)
+        let canonical = WorkspacePath.canonical(checkoutPath)
+        let parts = canonical.split(separator: "/").map(String.init)
+        if let idx = parts.firstIndex(of: "radar-trials"), idx + 1 < parts.count {
+            return parts[idx + 1]
+        }
+        return nil
+    }
+
+    public static func boardKey(from checkoutPath: String) -> String {
+        let base: String
+        if let common = gitCommonDirectory(from: checkoutPath) {
+            base = WorkspacePath.canonical(common)
+        } else {
+            base = WorkspacePath.canonical(checkoutPath)
+        }
+        if let trial = trialScope(from: checkoutPath) {
+            return "\(base)#trial=\(trial)"
+        }
+        return base
     }
 
     /// Short hash for `~/.blaze/radar/workspaces/<hash>/` session and board paths.

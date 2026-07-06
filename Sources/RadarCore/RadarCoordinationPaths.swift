@@ -12,6 +12,8 @@ public enum RadarCoordinationPaths {
         let normalized = path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         if infrastructureFiles.contains(normalized) { return true }
         if normalized == ".blaze" || normalized.hasPrefix(".blaze/") { return true }
+        if normalized == ".claude" || normalized.hasPrefix(".claude/") { return true }
+        if normalized == ".cursor" || normalized.hasPrefix(".cursor/") { return true }
         return false
     }
 

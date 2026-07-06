@@ -585,7 +585,7 @@ Radar is **state feedback**, not agent management. The control-theory framing an
 | Doc | Contents |
 |-----|----------|
 | [docs/RadarDynamics.md](docs/RadarDynamics.md) | Phase space, exploration vs oscillation, damping analogy |
-| [blaze-radar-benchmark](https://github.com/Mikedan37/blaze-radar-benchmark) | **Public harness + scorer** — run trials, measure pass/fail |
+| [blaze-radar-harness](https://github.com/Mikedan37/blaze-radar-harness) | **Measurement framework** — oscillation, energy, damping |
 
 **One line:** Proximity in workspace ≠ collision. What matters is velocity through explored space.
 

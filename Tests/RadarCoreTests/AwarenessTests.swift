@@ -104,11 +104,25 @@ final class AwarenessTests: XCTestCase {
     func testInfrastructurePathsFiltered() {
         XCTAssertTrue(RadarCoordinationPaths.isInfrastructure("CLAUDE.md"))
         XCTAssertTrue(RadarCoordinationPaths.isInfrastructure(".blaze/radar/summary.md"))
+        XCTAssertTrue(RadarCoordinationPaths.isInfrastructure(".claude/settings.json"))
+        XCTAssertTrue(RadarCoordinationPaths.isInfrastructure(".cursor/hooks.json"))
         XCTAssertFalse(RadarCoordinationPaths.isInfrastructure("src/main.swift"))
         XCTAssertEqual(
-            RadarCoordinationPaths.coordinationRelevant(["CLAUDE.md", ".blaze/", "src/Foo.swift"]),
+            RadarCoordinationPaths.coordinationRelevant(["CLAUDE.md", ".blaze/", ".claude/", "src/Foo.swift"]),
             ["src/Foo.swift"]
         )
+    }
+
+    func testInfrastructureOnlyChangesDoNotCollide() {
+        let ws = "/Users/test/RadarTest"
+        var a = AgentRegistration(agentName: "agent-a", task: "auth", branch: "main", worktree: ws)
+        var b = AgentRegistration(agentName: "agent-b", task: "tests", branch: "main", worktree: ws)
+        a.changedFiles = [".claude/settings.json", ".cursor/hooks.json"]
+        b.changedFiles = [".claude/hooks/radar-hook.sh"]
+
+        let result = RelatedAreaDetector.analyze([a, b])
+        XCTAssertTrue(result.files.isEmpty)
+        XCTAssertTrue(result.related.isEmpty)
     }
 
     func testObservingAgentsExcludedFromCollisions() {

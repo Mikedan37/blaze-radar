@@ -79,7 +79,7 @@ final class PresenceStatusTests: XCTestCase {
         let reg = try await service.register(workspacePath: ws, agentName: "a", task: "t", branch: "b", worktree: ws)
 
         var stored = try await BlazeDBAwarenessStore().find(workspacePath: ws, id: reg.id)!
-        stored.lastSeen = Date().addingTimeInterval(-45 * 60)
+        stored.lastSeen = Date().addingTimeInterval(-35 * 60)
         try await BlazeDBAwarenessStore().upsert(workspacePath: ws, registration: stored)
 
         let snapshot = await service.getActiveWork(workspacePath: ws)

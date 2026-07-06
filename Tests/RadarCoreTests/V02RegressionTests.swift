@@ -104,7 +104,7 @@ final class V02RegressionTests: XCTestCase {
         let reg = try await service.register(workspacePath: ws, agentName: "a", task: "t", branch: "b", worktree: ws)
 
         var stored = try await BlazeDBAwarenessStore().find(workspacePath: ws, id: reg.id)!
-        stored.lastSeen = Date().addingTimeInterval(-45 * 60)
+        stored.lastSeen = Date().addingTimeInterval(-35 * 60)
         try await BlazeDBAwarenessStore().upsert(workspacePath: ws, registration: stored)
 
         let snapshot = await service.getActiveWork(workspacePath: ws)
@@ -113,13 +113,13 @@ final class V02RegressionTests: XCTestCase {
         XCTAssertTrue(onBoard != nil, "v0.2: agent still on board when idle")
     }
 
-    func testStaleAfterSixHoursStillOnBoard() async throws {
+    func testStaleAfterLongSilenceStillOnBoard() async throws {
         let service = AwarenessService(store: BlazeDBAwarenessStore())
         let ws = tempDir.path
         let reg = try await service.register(workspacePath: ws, agentName: "a", task: "t", branch: "b", worktree: ws)
 
         var stored = try await BlazeDBAwarenessStore().find(workspacePath: ws, id: reg.id)!
-        stored.lastSeen = Date().addingTimeInterval(-7 * 3600)
+        stored.lastSeen = Date().addingTimeInterval(-65 * 60)
         try await BlazeDBAwarenessStore().upsert(workspacePath: ws, registration: stored)
 
         let snapshot = await service.getActiveWork(workspacePath: ws)

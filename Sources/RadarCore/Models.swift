@@ -5,21 +5,30 @@ public enum AgentRegistrationStatus: String, Codable, Sendable {
     case observing
     case idle
     case stale
+    case closed
     case done
     case withdrawn
 
     public var isOnBoard: Bool {
         switch self {
         case .active, .observing, .idle, .stale: return true
-        case .done, .withdrawn: return false
+        case .closed, .done, .withdrawn: return false
+        }
+    }
+
+    /// Agents that count as live coworkers for sync/collision (not ghosts).
+    public var participatesInCoordination: Bool {
+        switch self {
+        case .active: return true
+        case .observing, .idle, .stale, .closed, .done, .withdrawn: return false
         }
     }
 
     /// Agents in observing mode stay visible but do not trigger collision warnings.
     public var collisionRelevant: Bool {
         switch self {
-        case .active, .idle, .stale: return true
-        case .observing, .done, .withdrawn: return false
+        case .active: return true
+        case .observing, .idle, .stale, .closed, .done, .withdrawn: return false
         }
     }
 }
@@ -41,7 +50,11 @@ public struct AgentRegistration: Codable, Sendable, Equatable {
     public var openQuestions: [String]
     public var registeredAt: Date
     public var lastSeen: Date
+    public var lastHookSeen: Date?
+    public var lastSyncSeen: Date?
+    public var taskUpdatedAt: Date?
     public var completedAt: Date?
+    public var closedAt: Date?
 
     public init(
         id: UUID = UUID(),
@@ -60,7 +73,11 @@ public struct AgentRegistration: Codable, Sendable, Equatable {
         openQuestions: [String] = [],
         registeredAt: Date = Date(),
         lastSeen: Date = Date(),
-        completedAt: Date? = nil
+        lastHookSeen: Date? = nil,
+        lastSyncSeen: Date? = nil,
+        taskUpdatedAt: Date? = nil,
+        completedAt: Date? = nil,
+        closedAt: Date? = nil
     ) {
         self.id = id
         self.agentName = agentName
@@ -78,7 +95,15 @@ public struct AgentRegistration: Codable, Sendable, Equatable {
         self.openQuestions = openQuestions
         self.registeredAt = registeredAt
         self.lastSeen = lastSeen
+        self.lastHookSeen = lastHookSeen
+        self.lastSyncSeen = lastSyncSeen
+        self.taskUpdatedAt = taskUpdatedAt
         self.completedAt = completedAt
+        self.closedAt = closedAt
+    }
+
+    public var lastActivity: Date {
+        [lastHookSeen, lastSyncSeen, lastSeen].compactMap { $0 }.max() ?? lastSeen
     }
 }
 

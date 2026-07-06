@@ -6,7 +6,7 @@ public actor AwarenessService {
 
     private let store: any AwarenessStoreProtocol
     private let activeInterval: TimeInterval = 30 * 60
-    private let idleInterval: TimeInterval = 6 * 3600
+    private let idleInterval: TimeInterval = 60 * 60
 
     public init(store: (any AwarenessStoreProtocol)? = nil) {
         self.store = store ?? BlazeDBAwarenessStore()
@@ -28,7 +28,8 @@ public actor AwarenessService {
             agentName: agentName,
             task: task,
             branch: resolvedBranch,
-            worktree: resolvedWorktree
+            worktree: resolvedWorktree,
+            taskUpdatedAt: Date()
         )
 
         try await store.upsert(workspacePath: ws, registration: registration)
@@ -37,7 +38,7 @@ public actor AwarenessService {
         return registration
     }
 
-    public func sync(workspacePath: String, registrationId: UUID?) async -> SyncResult {
+    public func sync(workspacePath: String, registrationId: UUID?, hookTouch: Bool = false) async -> SyncResult {
         let ws = boardKey(from: workspacePath)
         await WorkspaceRegistry.shared.note(ws)
         var warnings: [String] = []
@@ -54,12 +55,17 @@ public actor AwarenessService {
             do {
                 if var reg = try await store.find(workspacePath: ws, id: registrationId),
                    reg.status.isOnBoard {
-                    reg.lastSeen = Date()
+                    let now = Date()
+                    reg.lastSeen = now
+                    reg.lastSyncSeen = now
+                    if hookTouch {
+                        reg.lastHookSeen = now
+                    }
                     if reg.status != .observing {
                         reg.status = .active
                     }
                     try await store.upsert(workspacePath: ws, registration: reg)
-                    try await store.recordSync(workspacePath: ws, agentId: registrationId, at: Date())
+                    try await store.recordSync(workspacePath: ws, agentId: registrationId, at: now)
                     heartbeatUpdated = true
                 }
             } catch {
@@ -108,11 +114,16 @@ public actor AwarenessService {
         let resolvedBranch = branch ?? detectBranch(worktree: resolvedWorktree) ?? reg.branch
         reg.branch = resolvedBranch
         reg.worktree = resolvedWorktree
-        reg.lastSeen = Date()
+        let now = Date()
+        reg.lastSeen = now
+        reg.lastSyncSeen = now
         if task.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "observing" {
             reg.task = "observing"
             reg.status = .observing
         } else {
+            if reg.task != task {
+                reg.taskUpdatedAt = now
+            }
             reg.task = task
             reg.status = .active
         }
@@ -144,6 +155,19 @@ public actor AwarenessService {
 
         try await store.upsert(workspacePath: ws, registration: reg)
         try writeSummary(workspacePath: ws, registration: reg)
+        return reg
+    }
+
+    public func markClosed(workspacePath: String, registrationId: UUID) async throws -> AgentRegistration {
+        let ws = boardKey(from: workspacePath)
+        guard var reg = try await store.find(workspacePath: ws, id: registrationId) else {
+            throw AwarenessError.registrationNotFound
+        }
+        let now = Date()
+        reg.status = .closed
+        reg.closedAt = now
+        reg.lastSeen = now
+        try await store.upsert(workspacePath: ws, registration: reg)
         return reg
     }
 
@@ -225,7 +249,7 @@ public actor AwarenessService {
             let now = Date()
             var changed = false
             for idx in all.indices where all[idx].status.isOnBoard && all[idx].status != .observing {
-                let elapsed = now.timeIntervalSince(all[idx].lastSeen)
+                let elapsed = now.timeIntervalSince(all[idx].lastActivity)
                 let newStatus: AgentRegistrationStatus
                 if elapsed <= activeInterval {
                     newStatus = .active
